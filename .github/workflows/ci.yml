@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        go: [oldstable, stable]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - name: test without cgo
+        if: runner.os != 'Windows'
+        run: CGO_ENABLED=0 go test -count=1 ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: vet every target
+        run: |
+          for target in linux/amd64 linux/arm64 linux/386 linux/arm linux/s390x darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 freebsd/amd64 solaris/amd64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
+          done
+      - name: staticcheck every platform
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
+          for goos in darwin linux windows freebsd; do
+            GOOS=$goos "$(go env GOPATH)/bin/staticcheck" ./...
+          done
+      - name: vet the benchmark module
+        working-directory: bench
+        run: go vet ./... && "$(go env GOPATH)/bin/staticcheck" ./...
+
+  fuzz:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go test -run '^$' -fuzz '^FuzzRecords$' -fuzztime 30s ./frd
+      - run: go test -run '^$' -fuzz '^FuzzDirents$' -fuzztime 30s ./frd
