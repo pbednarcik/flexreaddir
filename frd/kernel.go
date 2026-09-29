@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 package frd
 
@@ -24,7 +24,7 @@ func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	b := buffers.Get().(*[]byte)
 	defer buffers.Put(b)
 	var readErr error
-	if err = conn.Control(func(fd uintptr) { dst, readErr = readAll(dst, int(fd), *b) }); err == nil {
+	if err = conn.Control(func(fd uintptr) { dst, readErr = readAll(dst, fd, *b) }); err == nil {
 		err = readErr
 	}
 	if pe, ok := errors.AsType[*os.PathError](err); ok {

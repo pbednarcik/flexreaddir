@@ -15,7 +15,8 @@ import (
 
 const listOp = "getdents64"
 
-func readAll(dst []Entry, fd int, buf []byte) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
+	fd := int(h)
 	var stx unix.Statx_t
 	stat := func(name []byte) (Entry, bool, error) {
 		err := statx(fd, name, &stx)

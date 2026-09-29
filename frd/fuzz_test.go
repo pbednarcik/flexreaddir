@@ -40,3 +40,19 @@ func FuzzDirents(f *testing.F) {
 		}
 	})
 }
+
+func FuzzFullInfo(f *testing.F) {
+	f.Add(finfos(finfo{name: "a.go", attrs: 0x20, size: 1, writeTime: windowsEpoch}))
+	f.Add(finfos(finfo{name: "."}, finfo{name: "d", attrs: attrDirectory}, finfo{name: "🙂"}))
+	f.Fuzz(func(t *testing.T, buf []byte) {
+		got, _ := parseFullInfo(nil, buf)
+		for _, e := range got {
+			if e.Name == "" || e.Name == "." || e.Name == ".." || strings.IndexByte(e.Name, 0) >= 0 {
+				t.Fatalf("listed the name %q", e.Name)
+			}
+			if e.Type != 0 && (e.Size != 0 || e.ModTimeNanos != 0) {
+				t.Fatalf("%+v: only a regular file carries a size and a time", e)
+			}
+		}
+	})
+}

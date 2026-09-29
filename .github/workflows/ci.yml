@@ -54,7 +54,7 @@ jobs:
   fuzz:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -63,3 +63,4 @@ jobs:
           go-version: stable
       - run: go test -run '^$' -fuzz '^FuzzRecords$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzDirents$' -fuzztime 30s ./frd
+      - run: go test -run '^$' -fuzz '^FuzzFullInfo$' -fuzztime 30s ./frd

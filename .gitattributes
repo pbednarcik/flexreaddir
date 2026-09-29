@@ -1,0 +1,7 @@
+# Checkout must produce LF everywhere: gofmt rejects CRLF sources, and
+# core.autocrlf=true would otherwise smudge a fresh Windows clone into a
+# failing `gofmt -l`.
+* text=auto eol=lf
+
+# Go fuzz corpus files have no extension; declared so no platform converts them.
+frd/testdata/fuzz/** -text

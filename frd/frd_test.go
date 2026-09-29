@@ -109,3 +109,47 @@ func TestModTimeIsTheModificationTime(t *testing.T) {
 		t.Fatalf("ModTime() = %v", got)
 	}
 }
+
+func TestAnEmptyDirectoryListsNothing(t *testing.T) {
+	if got := readDir(t, t.TempDir()); len(got) != 0 {
+		t.Fatalf("listed %v in an empty directory", got)
+	}
+}
+
+func TestNamesOutsideASCIIAgreeWithReadDir(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"straße.go", "🙂.go", "a🙂ß.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readDir(t, dir)
+	if len(got) != len(des) {
+		t.Fatalf("listed %d entries, os.ReadDir %d", len(got), len(des))
+	}
+	for _, de := range des {
+		if _, ok := got[de.Name()]; !ok {
+			t.Errorf("os.ReadDir lists %q, AppendDir does not: %v", de.Name(), got)
+		}
+	}
+}
+
+func TestARegularFileIsAPathErrorNamingIt(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "a.go")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	_, err = AppendDir(nil, f)
+	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != file {
+		t.Fatalf("AppendDir on a file = %v, want an *os.PathError naming it", err)
+	}
+}

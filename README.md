@@ -29,8 +29,11 @@ regular file. Times are how long the whole job takes; lower is better.
   reading a Docker volume (btrfs) inside the VM, not a folder shared from the
   Mac. A VM adds cost to every system call, so these rows show the direction,
   not the size you would see on a Linux machine.
-- Windows: not measured. FlexReadDir uses the standard library there, because
-  Windows already returns sizes and times with the listing.
+- Windows: AMD Ryzen 9 9950X (16 cores, 32 threads), 96 GB, Windows 11 Pro
+  26200, NTFS on an Intel Optane P5800X with a RAM block cache in front of it,
+  Go 1.27.0. Measured natively; the single-directory and sequential rows were
+  pinned to one 8-core CCD, the parallel rows were not. A whole-tree timing on
+  this machine is a best case: the RAM cache makes the walk CPU-bound.
 
 **Not a fully quiet machine.** Other development work was paused during the
 runs, but macOS's own services were not: the one-minute load average, sampled
@@ -70,14 +73,41 @@ outside a VM.
 other walks do not. That is part of their cost, and anyone calling them pays
 it.
 
+### Walking `C:\Windows\WinSxS`: 105,402 files in 170,544 directories
+
+A Windows system tree, the opposite shape to the kernel source: more
+directories than files, and names averaging 94 characters. Measured on the
+Windows machine above, ten runs, warm cache.
+
+| How | Sequential | In parallel (32 workers) |
+|---|---:|---:|
+| `filepath.Walk` | 10.98 s | |
+| `filepath.WalkDir`, with `d.Info()` for each file | 6.59 s | |
+| `os.File.ReadDir` + `Info`, one directory at a time | 6.05 s | |
+| fastwalk v1.0.14, `d.Info()` for each file | 6.63 s (1 worker) | 1.93 s |
+| **FlexReadDir** | **5.70 s** | **1.91 s** |
+| Time saved | 13% against `filepath.WalkDir`, 6% against `ReadDir` | 1% against fastwalk, within noise (p=0.63) |
+
+Memory for the sequential walk: `ReadDir` + `Info` 1.67 M allocations and
+196 MiB, fastwalk 1.89 M and 209 MiB, FlexReadDir 929 k and 150 MiB; the
+counts include the walk's own path joins and directory opens. On this tree
+each directory costs the walk about 33 µs on one core, and most of that is
+opening the directory handle, which the walker does before FlexReadDir is
+called. A walker that opened each child relative to its parent's handle would
+gain more here than any listing library can.
+
 ### Listing one directory
 
-| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | 10 files, macOS | 10 files, Linux (Docker) |
-|---|---:|---:|---:|---:|
-| `os.File.ReadDir` + `Info` | 1,382 µs | 603 µs | 25.3 µs | 7.8 µs |
-| `os.File.Readdir` (older API, a `FileInfo` per entry) | 947 µs | 465 µs | 20.6 µs | 6.7 µs |
-| **FlexReadDir** | **362 µs** | **376 µs** | **13.6 µs** | **5.8 µs** |
-| Time saved against `ReadDir` + `Info` | 74% | 38% | 46% | 25% |
+| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | 1,000 files, Windows | 10 files, macOS | 10 files, Linux (Docker) | 10 files, Windows |
+|---|---:|---:|---:|---:|---:|---:|
+| `os.File.ReadDir` + `Info` | 1,382 µs | 603 µs | 190.0 µs | 25.3 µs | 7.8 µs | 15.7 µs |
+| `os.File.Readdir` (older API, a `FileInfo` per entry) | 947 µs | 465 µs | 187.8 µs | 20.6 µs | 6.7 µs | 16.4 µs |
+| **FlexReadDir** | **362 µs** | **376 µs** | **139.1 µs** | **13.6 µs** | **5.8 µs** | **13.8 µs** |
+| Time saved against `ReadDir` + `Info` | 74% | 38% | 27% | 46% | 25% | 12% |
+
+Windows already returns sizes and times with the listing, so there is no
+per-file system call to remove there; the saving is the per-entry work the
+standard library does in user space.
 
 ### Memory
 
@@ -85,11 +115,11 @@ The names from one directory read share one allocation instead of one each.
 The FlexReadDir rows reuse one result slice across listings, as the API
 section shows; the standard library returns a new slice every time.
 
-| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | Kernel source, macOS | Kernel source, Linux (Docker) |
-|---|---:|---:|---:|---:|
-| Standard library (`ReadDir` + `Info`) | 5,017 allocations, 504 KiB | 5,015 allocations, 426 KiB | 562 k allocations, 57.3 MiB | 549 k allocations, 40.9 MiB |
-| fastwalk with 1 worker | | | 691 k allocations, 57.8 MiB | 697 k allocations, 44.8 MiB |
-| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **31 k allocations, 3.3 MiB** | **31 k allocations, 2.6 MiB** |
+| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | 1,000 files, Windows | Kernel source, macOS | Kernel source, Linux (Docker) |
+|---|---:|---:|---:|---:|---:|
+| Standard library (`ReadDir` + `Info`) | 5,017 allocations, 504 KiB | 5,015 allocations, 426 KiB | 2,015 allocations, 160 KiB | 562 k allocations, 57.3 MiB | 549 k allocations, 40.9 MiB |
+| fastwalk with 1 worker | | | | 691 k allocations, 57.8 MiB | 697 k allocations, 44.8 MiB |
+| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **5 allocations, 12.4 KiB** | **31 k allocations, 3.3 MiB** | **31 k allocations, 2.6 MiB** |
 
 The kernel-source counts include the walk's own path joins, which every row
 pays.
@@ -102,15 +132,35 @@ so a slow spell of the machine is spread over all rows instead of falling on
 one row's ten runs. Every FlexReadDir row differs from each row it is compared
 with at p = 0.000 in `benchstat`. A second complete set of 10 runs, taken
 afterwards, reproduced every median within 2% on macOS and 5% in the
-container, with the same allocation counts. To reproduce:
+container, with the same allocation counts.
+
+The Windows rows were taken the same way, from a prebuilt test binary behind
+a quiet gate (total CPU under 8% for six 5-second samples; the last sample
+read 2.9%) and pinned to one CCD, so `GOMAXPROCS` was 16. Every row's 95%
+interval is within ±5% of its median. The second set reproduced every median
+within 4% with the same allocation counts, though its 1,000-file intervals
+were wider, up to ±9%. To reproduce:
 
 ```sh
 for i in $(seq 10); do go test ./frd -run '^$' -bench 'AppendDir' -benchmem -count 1; done
 cd bench && for i in $(seq 10); do FRD_TREE=/path/to/linux go test -run '^$' -bench . -benchmem -count 1; done
 ```
 
-Not measured yet: a fully quiet machine, Linux on real hardware, Windows,
-Intel machines, a cold file cache, and network filesystems.
+```powershell
+1..10 | ForEach-Object { go test ./frd -run '^$' -bench 'AppendDir' -benchmem -count 1 }
+```
+
+```powershell
+$env:FRD_TREE = 'D:\path\to\linux'; Set-Location bench
+1..10 | ForEach-Object { go test -run '^$' -bench . -benchmem -count 1 }
+```
+
+Not measured yet: a fully quiet machine, Linux on real hardware, the kernel
+source walk on Windows, Windows on a plain NVMe drive without the RAM block
+cache in front of it, Intel machines, a cold file cache, and network
+filesystems. The Windows tree rows above are the best case for that machine:
+with the block cache and a warm file cache the walk is CPU-bound, so they show
+what the code costs, not what a laptop's disk would add.
 
 Why each platform is faster:
 
@@ -121,15 +171,22 @@ Why each platform is faster:
   file is `statx`'d relative to the directory, with its name passed straight
   from the kernel's buffer. The portable way resolves the full path again and
   copies the name for every file.
-- **macOS and Linux**: all the names from one kernel read share a single
-  allocation and the result grows once per read, so a listing allocates a
-  handful of times whatever its size.
+- **Windows**: the directory is read as `FILE_FULL_DIR_INFO` records, which
+  already carry sizes and times; the standard library builds a `FileInfo`, a
+  name and a `DirEntry` for each, FlexReadDir one `Entry` with its name in a
+  shared allocation. A junction is `fs.ModeIrregular`, as `os.ReadDir` reports
+  it since Go 1.23; the pre-1.23 `winsymlink=0` setting is not honoured.
+- **macOS, Linux and Windows**: all the names from one kernel read share a
+  single allocation and the result grows once per read, so a listing allocates
+  a handful of times whatever its size.
 - **Everywhere**: `AppendDir` appends to a slice you can reuse across
   directories.
 
 ## API
 
-The whole package is four names.
+The whole package is four names. Runnable examples for each, including a tree
+walk, are in [`frd/example_test.go`](frd/example_test.go) and on
+[pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples).
 
 ### `AppendDir`
 
@@ -249,10 +306,20 @@ for exactly this kind of package. If a future Go release closed that
 door, the package would stop building on macOS rather than misbehave, and
 `golang.org/x/sys` would be in the same position.
 
-The buffers the kernel fills, macOS attribute records and Linux `getdents64`
-records, are parsed in plain, bounds-checked Go on every platform and fuzzed
-in CI: a buffer that does not hold what it claims is `ErrMalformed`, never a
-panic.
+The buffers the kernel fills, macOS attribute records, Linux `getdents64`
+records and Windows `FILE_FULL_DIR_INFO` records, are parsed in plain,
+bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
+hold what it claims is `ErrMalformed`, never a panic. Windows needs no
+trampoline: `GetFileInformationByHandleEx` comes from `golang.org/x/sys/windows`.
+
+## Status
+
+v0: the four names are meant to stay, but the module is young and the API is
+not frozen until v1. Every platform path is tested and fuzzed in CI on Linux,
+macOS and Windows, on the current and previous Go release.
+
+Design notes, plans and the measurements behind every number in this file are
+under [`docs/superpowers`](docs/superpowers), one dated file per question.
 
 ## Requirements
 

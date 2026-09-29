@@ -85,3 +85,36 @@ func TestParseDirentsIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 		t.Fatalf("parsing 100 dirents into nil allocated %v times, want 2", allocs)
 	}
 }
+
+func hundredFullInfos() []byte {
+	var rs []finfo
+	for _, name := range hundredFiles() {
+		rs = append(rs, finfo{name: name, attrs: 0x20, size: 1, writeTime: windowsEpoch})
+	}
+	return finfos(rs...)
+}
+
+func TestParseFullInfoAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
+	buf := hundredFullInfos()
+	dst := make([]Entry, 0, 100)
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseFullInfo(dst[:0], buf); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs > 1 {
+		t.Fatalf("parsing 100 records allocated %v times, want 1", allocs)
+	}
+}
+
+func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
+	buf := hundredFullInfos()
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseFullInfo(nil, buf); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs > 2 {
+		t.Fatalf("parsing 100 records into nil allocated %v times, want 2", allocs)
+	}
+}

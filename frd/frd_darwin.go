@@ -27,7 +27,8 @@ var requested = attrlist{
 
 const listOp = "getattrlistbulk"
 
-func readAll(dst []Entry, fd int, buf []byte) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
+	fd := int(h)
 	for {
 		n, err := getattrlistbulk(fd, &requested, buf)
 		if err == syscall.EINTR {

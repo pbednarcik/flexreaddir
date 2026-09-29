@@ -98,3 +98,21 @@ func BenchmarkParseDirents(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkParseFullInfo is the user-space cost of one kernel buffer of 1,000
+// Windows FILE_FULL_DIR_INFO records, with no system call in the loop.
+func BenchmarkParseFullInfo(b *testing.B) {
+	var rs []finfo
+	for i := range 1000 {
+		rs = append(rs, finfo{name: fmt.Sprintf("file%04d.go", i), attrs: 0x20, size: 10, writeTime: unixFiletime(1700000000, 0)})
+	}
+	buf := finfos(rs...)
+	dst := make([]Entry, 0, len(rs))
+	b.SetBytes(int64(len(buf)))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := parseFullInfo(dst[:0], buf); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
