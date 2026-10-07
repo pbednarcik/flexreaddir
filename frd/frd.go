@@ -27,7 +27,9 @@ type Entry struct {
 
 	// ModTimeNanos is a regular file's modification time in nanoseconds
 	// since the Unix epoch. An integer keeps Entry comparable with == and
-	// a change check to one comparison; ModTime converts it.
+	// a change check to one comparison; ModTime converts it. As with
+	// time.Time.UnixNano, a time before the year 1678 or after 2262 does
+	// not fit and the value is undefined.
 	ModTimeNanos int64
 }
 
@@ -51,7 +53,35 @@ var ErrMalformed = errors.New("frd: malformed directory buffer")
 // as an error.
 //
 // Any other failure is returned as an *os.PathError, together with dst
-// extended by the entries read before it.
+// extended by the entries read before it. A closed dir is reported as
+// fs.ErrClosed and a nil one as os.ErrInvalid, as os.File's methods report
+// them.
+//
+// AppendDir is safe to call from many goroutines at once. It borrows the
+// buffer the kernel fills from a sync.Pool, which may drop its buffers at any
+// garbage collection. A walker that lists many directories keeps a Lister
+// instead, one per goroutine.
 func AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDir(dst, dir)
+}
+
+// Lister is declared with each platform's state, in kernel.go and
+// frd_other.go.
+
+// AppendDir is the function AppendDir with the Lister's buffer.
+func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
+	return l.appendDir(dst, dir)
+}
+
+// AppendHandle is AppendDir for a directory the caller holds as a raw
+// handle on Windows or a file descriptor elsewhere, the value os.File.Fd
+// returns, so a walker that opens directories itself need not wrap each in
+// an os.File. The listing starts at the handle's current position. name is
+// used only in errors, as os.NewFile uses it.
+//
+// AppendHandle does not close the handle or change its mode, and the caller
+// must not close it during the call. On platforms without a native listing
+// it returns an *os.PathError wrapping errors.ErrUnsupported.
+func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error) {
+	return l.appendHandle(dst, fd, name)
 }

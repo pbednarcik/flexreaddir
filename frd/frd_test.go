@@ -98,8 +98,19 @@ func TestAClosedDirectoryIsAPathErrorNamingIt(t *testing.T) {
 	}
 	f.Close()
 	_, err = AppendDir(nil, f)
-	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != f.Name() {
-		t.Fatalf("AppendDir on a closed directory = %v, want an *os.PathError naming it", err)
+	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != f.Name() || !errors.Is(err, fs.ErrClosed) {
+		t.Fatalf("AppendDir on a closed directory = %v, want an *os.PathError naming it and wrapping fs.ErrClosed", err)
+	}
+	var l Lister
+	if _, err = l.AppendDir(nil, f); !errors.Is(err, fs.ErrClosed) {
+		t.Fatalf("Lister.AppendDir on a closed directory = %v, want fs.ErrClosed", err)
+	}
+}
+
+func TestANilFileIsAPathError(t *testing.T) {
+	_, err := AppendDir(nil, nil)
+	if _, ok := errors.AsType[*os.PathError](err); !ok || !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("AppendDir(nil, nil) = %v, want an *os.PathError wrapping os.ErrInvalid", err)
 	}
 }
 

@@ -184,7 +184,7 @@ Why each platform is faster:
 
 ## API
 
-The whole package is four names. Runnable examples for each, including a tree
+The whole package is five names. Runnable examples for each, including a tree
 walk, are in [`frd/example_test.go`](frd/example_test.go) and on
 [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples).
 
@@ -236,6 +236,34 @@ for _, dir := range dirs {
 	// use entries before the next iteration overwrites them
 }
 ```
+
+### `Lister`
+
+```go
+type Lister struct{ /* the buffer the kernel fills */ }
+
+func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error)
+func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error)
+```
+
+The function `AppendDir` borrows the 64 KiB buffer the kernel fills from a
+`sync.Pool`, which may drop its buffers at any garbage collection. A walker that
+lists many directories keeps a `Lister` per goroutine instead, which owns its
+buffer for as long as the walker keeps it. The zero `Lister` is ready to use;
+it must not be shared between goroutines.
+
+`AppendHandle` is for a walker that opens directories itself: it lists a raw
+Windows handle or Unix descriptor, the value `os.File.Fd` returns, without
+wrapping it in an `os.File`. It reads from the handle's current position and
+never closes it; `name` is used only in errors. Where there is no native
+listing it returns an error wrapping `errors.ErrUnsupported`.
+
+On the Windows machine above, a parallel walk of the kernel source with one
+kept `Lister` per worker and `AppendHandle` allocated 3.7 MiB against 19.6 MiB
+with the function `AppendDir`. In a parallel walk that matters for time too:
+fewer allocations mean fewer collections, and every collection makes the
+walk's threads queue on the Go scheduler's lock as they enter system calls
+([the rows](docs/superpowers/evidence/2026-10-07-lister.md)).
 
 ### `Entry`
 

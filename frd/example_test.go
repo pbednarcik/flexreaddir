@@ -136,6 +136,42 @@ func Example_walk() {
 	// Output: 3 files, 12 bytes
 }
 
+// A walker keeps one Lister per goroutine, so the buffer the kernel fills is
+// allocated once for the whole walk, and again for the next walk if the
+// walker keeps its Listers.
+func ExampleLister() {
+	root, cleanup := exampleTree()
+	defer cleanup()
+
+	var l frd.Lister
+	var entries []frd.Entry
+	files := 0
+	pending := []string{root}
+	for len(pending) > 0 {
+		dir := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		f, err := os.Open(dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		entries, err = l.AppendDir(entries[:0], f)
+		f.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, e := range entries {
+			switch {
+			case e.Type.IsDir():
+				pending = append(pending, filepath.Join(dir, e.Name))
+			case e.Type.IsRegular():
+				files++
+			}
+		}
+	}
+	fmt.Println(files, "files")
+	// Output: 3 files
+}
+
 // Entry is comparable, so whether a file changed since an earlier listing is
 // one comparison against the Entry kept from that listing.
 func ExampleEntry() {

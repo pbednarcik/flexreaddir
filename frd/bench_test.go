@@ -1,6 +1,7 @@
 package frd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,32 @@ func BenchmarkAppendDir(b *testing.B) {
 					entries, err = AppendDir(entries[:0], f)
 					return len(entries), err
 				})
+			})
+			b.Run("frd-lister", func(b *testing.B) {
+				var l Lister
+				var entries []Entry
+				benchListing(b, dir, files, func(f *os.File) (n int, err error) {
+					entries, err = l.AppendDir(entries[:0], f)
+					return len(entries), err
+				})
+			})
+			// The walker that opens directories itself: a bare handle, no os.File.
+			b.Run("frd-handle", func(b *testing.B) {
+				var l Lister
+				var entries []Entry
+				b.ReportAllocs()
+				for b.Loop() {
+					fd, closeFd := openRaw(b, dir)
+					var err error
+					entries, err = l.AppendHandle(entries[:0], fd, dir)
+					closeFd()
+					if errors.Is(err, errors.ErrUnsupported) {
+						b.Skip(err)
+					}
+					if err != nil || len(entries) != files {
+						b.Fatalf("%d entries, %v; want %d", len(entries), err, files)
+					}
+				}
 			})
 			b.Run("readdir-info", func(b *testing.B) {
 				benchListing(b, dir, files, func(f *os.File) (int, error) {
