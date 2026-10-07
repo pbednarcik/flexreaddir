@@ -32,8 +32,10 @@ regular file. Times are how long the whole job takes; lower is better.
 - Windows: AMD Ryzen 9 9950X (16 cores, 32 threads), 96 GB, Windows 11 Pro
   26200, NTFS on an Intel Optane P5800X with a RAM block cache in front of it,
   Go 1.27.0. Measured natively; the single-directory and sequential rows were
-  pinned to one 8-core CCD, the parallel rows were not. A whole-tree timing on
-  this machine is a best case: the RAM cache makes the walk CPU-bound.
+  pinned to one 8-core CCD, the parallel rows were not. The kernel-source rows
+  were taken later, on Windows 11 Pro 26300, from a Crucial T700 NVMe drive
+  with no block cache in front of it. Every Windows timing is warm-cache, so
+  it measures the code, not the disk.
 
 **Not a fully quiet machine.** Other development work was paused during the
 runs, but macOS's own services were not: the one-minute load average, sampled
@@ -42,25 +44,32 @@ interval is within ±5% of its median.
 
 ### Walking the Linux kernel source: 95,910 files in 6,282 directories
 
+The Windows column walked a newer checkout of the same tree, 96,061 files in
+6,297 directories.
+
 Sequentially:
 
-| How | macOS | Linux (Docker) |
-|---|---:|---:|
-| `filepath.Walk` | 274 ms | 107 ms |
-| `filepath.WalkDir`, with `d.Info()` for each file | 272 ms | 105 ms |
-| `os.File.ReadDir` + `Info`, one directory at a time | 255 ms | 90 ms |
-| [fastwalk](https://github.com/charlievieth/fastwalk) v1.0.14 with 1 worker, `d.Info()` for each file | 281 ms | 126 ms |
-| **FlexReadDir**, one directory at a time | **169 ms** | **70 ms** |
-| Time saved against `filepath.WalkDir` | 38% | 33% |
+| How | macOS | Linux (Docker) | Windows |
+|---|---:|---:|---:|
+| `filepath.Walk` | 274 ms | 107 ms | 743 ms |
+| `filepath.WalkDir`, with `d.Info()` for each file | 272 ms | 105 ms | 157 ms |
+| `os.File.ReadDir` + `Info`, one directory at a time | 255 ms | 90 ms | 128 ms |
+| [fastwalk](https://github.com/charlievieth/fastwalk) v1.0.14 with 1 worker, `d.Info()` for each file | 281 ms | 126 ms | 158 ms |
+| **FlexReadDir**, one directory at a time | **169 ms** | **70 ms** | **111 ms** |
+| Time saved against `filepath.WalkDir` | 38% | 33% | 29% |
+
+On Windows `filepath.Walk` stands out: it makes a separate `os.Lstat` call by
+full path for every file, where the other walks take what the directory
+listing already returned.
 
 In parallel, with fastwalk's default worker count for each machine (10 on
-this Mac, 18 in the container) given to both:
+this Mac, 18 in the container, 32 on the Windows machine) given to both:
 
-| How | macOS | Linux (Docker) |
-|---|---:|---:|
-| fastwalk v1.0.14, `d.Info()` for each file | 86.0 ms | 102.0 ms |
-| **FlexReadDir** in a minimal worker pool | **59.3 ms** | **30.7 ms** |
-| Time saved against fastwalk | 31% | 70% |
+| How | macOS | Linux (Docker) | Windows |
+|---|---:|---:|---:|
+| fastwalk v1.0.14, `d.Info()` for each file | 86.0 ms | 102.0 ms | 72.1 ms |
+| **FlexReadDir** in a minimal worker pool | **59.3 ms** | **30.7 ms** | **31.2 ms** |
+| Time saved against fastwalk | 31% | 70% | 57% |
 
 FlexReadDir lists one directory and does not walk trees, so the parallel row
 uses the small worker pool in [`bench/tree_test.go`](bench/tree_test.go). fastwalk
@@ -115,11 +124,11 @@ The names from one directory read share one allocation instead of one each.
 The FlexReadDir rows reuse one result slice across listings, as the API
 section shows; the standard library returns a new slice every time.
 
-| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | 1,000 files, Windows | Kernel source, macOS | Kernel source, Linux (Docker) |
-|---|---:|---:|---:|---:|---:|
-| Standard library (`ReadDir` + `Info`) | 5,017 allocations, 504 KiB | 5,015 allocations, 426 KiB | 2,015 allocations, 160 KiB | 562 k allocations, 57.3 MiB | 549 k allocations, 40.9 MiB |
-| fastwalk with 1 worker | | | | 691 k allocations, 57.8 MiB | 697 k allocations, 44.8 MiB |
-| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **5 allocations, 12.4 KiB** | **31 k allocations, 3.3 MiB** | **31 k allocations, 2.6 MiB** |
+| How | 1,000 files, macOS | 1,000 files, Linux (Docker) | 1,000 files, Windows | Kernel source, macOS | Kernel source, Linux (Docker) | Kernel source, Windows |
+|---|---:|---:|---:|---:|---:|---:|
+| Standard library (`ReadDir` + `Info`) | 5,017 allocations, 504 KiB | 5,015 allocations, 426 KiB | 2,015 allocations, 160 KiB | 562 k allocations, 57.3 MiB | 549 k allocations, 40.9 MiB | 265 k allocations, 19.9 MiB |
+| fastwalk with 1 worker | | | | 691 k allocations, 57.8 MiB | 697 k allocations, 44.8 MiB | 460 k allocations, 31.2 MiB |
+| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **5 allocations, 12.4 KiB** | **31 k allocations, 3.3 MiB** | **31 k allocations, 2.6 MiB** | **35 k allocations, 4.0 MiB** |
 
 The kernel-source counts include the walk's own path joins, which every row
 pays.
@@ -155,12 +164,14 @@ $env:FRD_TREE = 'D:\path\to\linux'; Set-Location bench
 1..10 | ForEach-Object { go test -run '^$' -bench . -benchmem -count 1 }
 ```
 
-Not measured yet: a fully quiet machine, Linux on real hardware, the kernel
-source walk on Windows, Windows on a plain NVMe drive without the RAM block
-cache in front of it, Intel machines, a cold file cache, and network
-filesystems. The Windows tree rows above are the best case for that machine:
-with the block cache and a warm file cache the walk is CPU-bound, so they show
-what the code costs, not what a laptop's disk would add.
+The Windows kernel-source rows were taken the same way on 2026-10-07: quiet
+gate (last sample 6.1%), ten passes, sequential rows pinned, parallel rows
+not, every FlexReadDir row different from its comparison at p = 0.000.
+
+Not measured yet: a fully quiet machine, Linux on real hardware, Intel
+machines, a cold file cache, and network filesystems. Every tree row above is
+warm-cache, so it shows what the code costs, not what a laptop's disk would
+add.
 
 Why each platform is faster:
 
