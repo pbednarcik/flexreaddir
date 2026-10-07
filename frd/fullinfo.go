@@ -49,6 +49,9 @@ func parseFullInfo(dst []Entry, buf []byte) ([]Entry, error) {
 		e := Entry{Name: names.add(name), Type: attrMode(r.attrs, r.tag)}
 		if e.Type.IsRegular() {
 			e.Size, e.ModTimeNanos = r.size, (r.writeTime-windowsEpoch)*100
+			if r.changeTime != 0 { // zero: a filesystem that keeps no change time
+				e.ChangeTimeNanos = (r.changeTime - windowsEpoch) * 100
+			}
 		}
 		dst = append(dst, e)
 		return nil
@@ -58,11 +61,12 @@ func parseFullInfo(dst []Entry, buf []byte) ([]Entry, error) {
 
 // fullInfo is one entry as the kernel returned it; name is its UTF-16LE bytes.
 type fullInfo struct {
-	name      []byte
-	attrs     uint32
-	tag       uint32
-	size      int64
-	writeTime int64 // FILETIME
+	name       []byte
+	attrs      uint32
+	tag        uint32
+	size       int64
+	writeTime  int64 // FILETIME
+	changeTime int64 // FILETIME
 }
 
 // eachFullInfo calls visit for every record chained in buf except "." and
@@ -83,11 +87,12 @@ func eachFullInfo(buf []byte, visit func(fullInfo) error) error {
 		name := buf[fullInfoHeader : fullInfoHeader+nameLen]
 		if !dotOrDotDot(name) {
 			err := visit(fullInfo{
-				name:      name,
-				attrs:     le.Uint32(buf[56:]),
-				tag:       le.Uint32(buf[64:]),
-				size:      int64(le.Uint64(buf[40:])),
-				writeTime: int64(le.Uint64(buf[24:])),
+				name:       name,
+				attrs:      le.Uint32(buf[56:]),
+				tag:        le.Uint32(buf[64:]),
+				size:       int64(le.Uint64(buf[40:])),
+				writeTime:  int64(le.Uint64(buf[24:])),
+				changeTime: int64(le.Uint64(buf[32:])),
 			})
 			if err != nil {
 				return err

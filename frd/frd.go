@@ -33,15 +33,17 @@ type Entry struct {
 	// not fit and the value is undefined.
 	ModTimeNanos int64
 
-	// ChangeTimeNanos is a regular file's status change time (st_ctime) in
-	// nanoseconds since the Unix epoch, which every write(2) moves and no
-	// unix call sets: ATTR_CMN_CHGTIME on darwin, statx's stx_ctime on linux,
-	// and zero on windows and the other platforms, whose arms do not read it.
+	// ChangeTimeNanos is a regular file's status change time in nanoseconds
+	// since the Unix epoch, which every write and every change to the file's
+	// metadata moves: st_ctime as ATTR_CMN_CHGTIME on darwin and statx's
+	// stx_ctime on linux, which no unix call sets; FILE_FULL_DIR_INFO's
+	// ChangeTime on windows, which SetFileInformationByHandle can set; and
+	// zero on the other platforms, whose arms do not read it.
 	ChangeTimeNanos int64
 
 	// FileID is a regular file's number on its volume: ATTR_CMN_FILEID on
-	// darwin, statx's stx_ino on linux, and zero on windows and the other
-	// platforms, whose arms do not read it.
+	// darwin, statx's stx_ino on linux, and zero on windows, whose listing
+	// call does not return it, and on the other platforms.
 	FileID uint64
 }
 

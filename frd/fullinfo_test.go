@@ -13,12 +13,13 @@ import (
 // that cannot ask the kernel for a malformed one. units, when set, is the
 // name as UTF-16 units and lets a test pack an unpaired surrogate.
 type finfo struct {
-	name      string
-	units     []uint16
-	attrs     uint32
-	tag       uint32
-	size      int64
-	writeTime int64
+	name       string
+	units      []uint16
+	attrs      uint32
+	tag        uint32
+	size       int64
+	writeTime  int64
+	changeTime int64
 }
 
 func (r finfo) bytes(next uint32) []byte {
@@ -30,6 +31,7 @@ func (r finfo) bytes(next uint32) []byte {
 	b := make([]byte, fullInfoHeader, fullInfoHeader+2*len(units))
 	le.PutUint32(b, next)
 	le.PutUint64(b[24:], uint64(r.writeTime))
+	le.PutUint64(b[32:], uint64(r.changeTime))
 	le.PutUint64(b[40:], uint64(r.size))
 	le.PutUint32(b[56:], r.attrs)
 	le.PutUint32(b[60:], uint32(2*len(units)))
@@ -61,12 +63,20 @@ func finfos(rs ...finfo) []byte {
 // Unix epoch.
 func unixFiletime(sec, nsec int64) int64 { return windowsEpoch + sec*1e7 + nsec/100 }
 
-func TestAFullInfoRegularFileCarriesItsSizeAndModificationTime(t *testing.T) {
-	got, err := parseFullInfo(nil, finfos(finfo{name: "a.go", attrs: 0x20, size: 10, writeTime: unixFiletime(1700000000, 123456700)}))
+func TestAFullInfoRegularFileCarriesItsSizeAndTimes(t *testing.T) {
+	got, err := parseFullInfo(nil, finfos(
+		finfo{name: "a.go", attrs: 0x20, size: 10, writeTime: unixFiletime(1700000000, 123456700), changeTime: unixFiletime(1700000001, 987654300)},
+		finfo{name: "b.go", attrs: 0x20, size: 1, writeTime: unixFiletime(1, 0)}, // no change time kept
+		finfo{name: "d", attrs: attrDirectory, writeTime: unixFiletime(1, 0), changeTime: unixFiletime(2, 0)},
+	))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Entry{{Name: "a.go", Size: 10, ModTimeNanos: 1700000000*1e9 + 123456700}}
+	want := []Entry{
+		{Name: "a.go", Size: 10, ModTimeNanos: 1700000000*1e9 + 123456700, ChangeTimeNanos: 1700000001*1e9 + 987654300},
+		{Name: "b.go", Size: 1, ModTimeNanos: 1e9},
+		{Name: "d", Type: fs.ModeDir},
+	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

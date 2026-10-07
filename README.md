@@ -273,20 +273,29 @@ type Entry struct {
 	Type            fs.FileMode // type bits only, as fs.DirEntry.Type reports them
 	Size            int64       // a regular file's data length in bytes
 	ModTimeNanos    int64       // a regular file's modification time, Unix nanoseconds
-	ChangeTimeNanos int64       // its status change time (st_ctime); darwin and linux only
-	FileID          uint64      // its number on the volume (inode); darwin and linux only
+	ChangeTimeNanos int64       // its status change time; macOS, Linux and Windows
+	FileID          uint64      // its number on the volume (inode); macOS and Linux
 }
 ```
 
-One directory entry. `Size` and `ModTimeNanos` are filled for regular files
-and zero for every other type, on every platform. `ChangeTimeNanos` and
-`FileID` are read on darwin (`ATTR_CMN_CHGTIME`, `ATTR_CMN_FILEID`) and linux
-(`statx`'s `stx_ctime` and `stx_ino`) and are zero on Windows and the other
-platforms; a walker that trusts a stamp only where the change time and the
-file id are present can tell a replaced file from a rewritten one there. The names from one read
-share one allocation, so a `Name` kept long after its neighbours are gone is
-worth a `strings.Clone`. `Entry` is comparable, so
-deciding whether a file changed since the last listing is one `==`:
+One directory entry. Every field but `Name` and `Type` is filled for regular
+files only and is zero for every other type. `Size` and `ModTimeNanos` are
+filled on every platform.
+
+`ChangeTimeNanos` moves on every write and every change to the file's
+metadata, such as its permissions. It comes from `ATTR_CMN_CHGTIME` on macOS,
+`statx`'s `stx_ctime` on Linux and the listing's own `ChangeTime` on Windows,
+and is zero on the other platforms and on a Windows filesystem that keeps no
+change time. `FileID` comes from `ATTR_CMN_FILEID` on macOS and `stx_ino` on
+Linux; the Windows listing call does not return it, so it is zero there. With
+both present, a walker can tell a file replaced by another from one rewritten
+in place.
+
+The names from one read share one allocation, so a `Name` kept long after its
+neighbours are gone is worth a `strings.Clone`. `Entry` is comparable, so
+deciding whether a file changed since the last listing is one `==`. Because
+`==` includes the change time, a permissions change counts as a change on the
+platforms that report one:
 
 ```go
 previous := map[string]frd.Entry{} // from the last listing
