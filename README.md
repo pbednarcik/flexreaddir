@@ -67,9 +67,19 @@ this Mac, 18 in the container, 32 on the Windows machine) given to both:
 
 | How | macOS | Linux (Docker) | Windows |
 |---|---:|---:|---:|
-| fastwalk v1.0.14, `d.Info()` for each file | 86.0 ms | 102.0 ms | 72.1 ms |
-| **FlexReadDir** in a minimal worker pool | **59.3 ms** | **30.7 ms** | **31.2 ms** |
-| Time saved against fastwalk | 31% | 70% | 57% |
+| fastwalk v1.0.14, `d.Info()` for each file | 86.0 ms | 102.0 ms | 71.7 ms |
+| [saracen/walker](https://github.com/saracen/walker) v0.1.4, its `os.FileInfo` | not measured | not measured | 53.4 ms |
+| **FlexReadDir** in a minimal worker pool | **59.3 ms** | **30.7 ms** | **28.1 ms** |
+| Time saved against fastwalk | 31% | 70% | 61% |
+
+On Windows FlexReadDir also saves 47% against saracen/walker, with 13.7 MiB
+and 36 k allocations per walk against its 54.0 MiB and 365 k (fastwalk:
+63.6 MiB, 462 k). The three Windows rows come from one run.
+
+[godirwalk](https://github.com/karrick/godirwalk) v1.17.0 was tried too but
+cannot walk on Windows: its scanner reads with `os.File.Readdir(1)` and takes
+the `io.EOF` that ends every directory for an error. It reports no sizes or
+times either, so a caller would `os.Lstat` each file.
 
 FlexReadDir lists one directory and does not walk trees, so the parallel row
 uses the small worker pool in [`bench/tree_test.go`](bench/tree_test.go). fastwalk
