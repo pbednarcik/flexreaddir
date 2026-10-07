@@ -8,6 +8,8 @@ import (
 func FuzzRecords(f *testing.F) {
 	f.Add(records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1}), 1)
 	f.Add(records(rec{common: attrName | attrError, errno: errnoNotExist, name: "gone"}, rec{common: every, name: "d", objtype: typeDir}), 2)
+	f.Add(records(rec{common: attrName | attrObjtype | attrModtime, file: attrDataLength, name: "old.go", objtype: typeRegular, size: 1},
+		rec{common: every, file: attrDataLength, name: "b.go", objtype: typeRegular, chg: 1, fileID: 2, size: 3}), 2)
 	f.Fuzz(func(t *testing.T, buf []byte, n int) {
 		got, err := parseRecords(nil, buf, n)
 		if err != nil {
@@ -17,8 +19,8 @@ func FuzzRecords(f *testing.F) {
 			t.Fatalf("%d records claimed, %d entries returned", n, len(got))
 		}
 		for _, e := range got {
-			if e.Type != 0 && (e.Size != 0 || e.ModTimeNanos != 0) {
-				t.Fatalf("%+v: only a regular file carries a size and a time", e)
+			if e.Type != 0 && (e.Size != 0 || e.ModTimeNanos != 0 || e.ChangeTimeNanos != 0 || e.FileID != 0) {
+				t.Fatalf("%+v: only a regular file carries a size, its times and its id", e)
 			}
 		}
 	})

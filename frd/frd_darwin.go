@@ -21,7 +21,7 @@ type attrlist struct {
 
 var requested = attrlist{
 	bitmapCount: 5,
-	common:      attrReturned | attrName | attrError | attrObjtype | attrModtime,
+	common:      attrReturned | attrName | attrError | attrObjtype | attrModtime | attrChgtime | attrFileID,
 	file:        attrDataLength,
 }
 

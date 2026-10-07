@@ -269,15 +269,21 @@ walk's threads queue on the Go scheduler's lock as they enter system calls
 
 ```go
 type Entry struct {
-	Name         string      // the name within its directory, without a path
-	Type         fs.FileMode // type bits only, as fs.DirEntry.Type reports them
-	Size         int64       // a regular file's data length in bytes
-	ModTimeNanos int64       // a regular file's modification time, Unix nanoseconds
+	Name            string      // the name within its directory, without a path
+	Type            fs.FileMode // type bits only, as fs.DirEntry.Type reports them
+	Size            int64       // a regular file's data length in bytes
+	ModTimeNanos    int64       // a regular file's modification time, Unix nanoseconds
+	ChangeTimeNanos int64       // its status change time (st_ctime); darwin and linux only
+	FileID          uint64      // its number on the volume (inode); darwin and linux only
 }
 ```
 
 One directory entry. `Size` and `ModTimeNanos` are filled for regular files
-and zero for every other type, on every platform. The names from one read
+and zero for every other type, on every platform. `ChangeTimeNanos` and
+`FileID` are read on darwin (`ATTR_CMN_CHGTIME`, `ATTR_CMN_FILEID`) and linux
+(`statx`'s `stx_ctime` and `stx_ino`) and are zero on Windows and the other
+platforms; a walker that trusts a stamp only where the change time and the
+file id are present can tell a replaced file from a rewritten one there. The names from one read
 share one allocation, so a `Name` kept long after its neighbours are gone is
 worth a `strings.Clone`. `Entry` is comparable, so
 deciding whether a file changed since the last listing is one `==`:

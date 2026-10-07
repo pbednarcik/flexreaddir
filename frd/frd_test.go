@@ -50,7 +50,8 @@ func TestAppendDirAgreesWithLstat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (Entry{Name: "a.go", Size: info.Size(), ModTimeNanos: info.ModTime().UnixNano()}); got["a.go"] != want {
+	change, id := identity(t, file)
+	if want := (Entry{Name: "a.go", Size: info.Size(), ModTimeNanos: info.ModTime().UnixNano(), ChangeTimeNanos: change, FileID: id}); got["a.go"] != want {
 		t.Errorf("a.go = %+v, want %+v", got["a.go"], want)
 	}
 	if want := (Entry{Name: "sub", Type: fs.ModeDir}); got["sub"] != want {

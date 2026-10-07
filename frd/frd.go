@@ -9,8 +9,9 @@ import (
 
 // Entry describes one name in a directory listing.
 //
-// Size and ModTimeNanos describe regular files only; for every other type
-// they are zero on every platform, so an Entry compares the same everywhere.
+// Size, ModTimeNanos, ChangeTimeNanos and FileID describe regular files only;
+// for every other type they are zero on every platform, so an Entry compares
+// the same everywhere.
 type Entry struct {
 	// Name is the entry's name within its directory, without a path. The
 	// names from one read share one allocation, so a Name kept long after
@@ -31,6 +32,17 @@ type Entry struct {
 	// time.Time.UnixNano, a time before the year 1678 or after 2262 does
 	// not fit and the value is undefined.
 	ModTimeNanos int64
+
+	// ChangeTimeNanos is a regular file's status change time (st_ctime) in
+	// nanoseconds since the Unix epoch, which every write(2) moves and no
+	// unix call sets: ATTR_CMN_CHGTIME on darwin, statx's stx_ctime on linux,
+	// and zero on windows and the other platforms, whose arms do not read it.
+	ChangeTimeNanos int64
+
+	// FileID is a regular file's number on its volume: ATTR_CMN_FILEID on
+	// darwin, statx's stx_ino on linux, and zero on windows and the other
+	// platforms, whose arms do not read it.
+	FileID uint64
 }
 
 // ModTime returns the entry's modification time, which is the zero Unix time

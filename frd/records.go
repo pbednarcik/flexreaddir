@@ -12,6 +12,8 @@ const (
 	attrName       = 0x00000001 // ATTR_CMN_NAME
 	attrObjtype    = 0x00000008 // ATTR_CMN_OBJTYPE
 	attrModtime    = 0x00000400 // ATTR_CMN_MODTIME
+	attrChgtime    = 0x00000800 // ATTR_CMN_CHGTIME
+	attrFileID     = 0x02000000 // ATTR_CMN_FILEID
 	attrError      = 0x20000000 // ATTR_CMN_ERROR
 	attrReturned   = 0x80000000 // ATTR_CMN_RETURNED_ATTRS
 	attrDataLength = 0x00000200 // ATTR_FILE_DATALENGTH, not TOTALSIZE, which counts a resource fork
@@ -68,7 +70,7 @@ func parseRecords(dst []Entry, buf []byte, n int) ([]Entry, error) {
 	err := eachRecord(buf, n, func(r record) {
 		e := Entry{Name: names.add(r.name), Type: r.mode}
 		if r.mode.IsRegular() {
-			e.Size, e.ModTimeNanos = r.size, r.modTime
+			e.Size, e.ModTimeNanos, e.ChangeTimeNanos, e.FileID = r.size, r.modTime, r.chgTime, r.fileID
 		}
 		dst = append(dst, e)
 	})
@@ -81,6 +83,8 @@ type record struct {
 	mode    fs.FileMode
 	size    int64
 	modTime int64
+	chgTime int64
+	fileID  uint64
 }
 
 // eachRecord calls visit for the n records in buf, skipping an entry removed
@@ -151,6 +155,20 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 				return ErrMalformed
 			}
 			r.modTime = int64(le.Uint64(f))*1e9 + int64(le.Uint64(f[8:]))
+		}
+		if common&attrChgtime != 0 {
+			f, ok := field(16)
+			if !ok {
+				return ErrMalformed
+			}
+			r.chgTime = int64(le.Uint64(f))*1e9 + int64(le.Uint64(f[8:]))
+		}
+		if common&attrFileID != 0 {
+			f, ok := field(8)
+			if !ok {
+				return ErrMalformed
+			}
+			r.fileID = le.Uint64(f)
 		}
 		if file&attrDataLength != 0 {
 			f, ok := field(8)

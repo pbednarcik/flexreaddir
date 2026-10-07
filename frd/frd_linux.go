@@ -30,6 +30,8 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 		if e.Type.IsRegular() {
 			e.Size = int64(stx.Size)
 			e.ModTimeNanos = stx.Mtime.Sec*1e9 + int64(stx.Mtime.Nsec)
+			e.ChangeTimeNanos = stx.Ctime.Sec*1e9 + int64(stx.Ctime.Nsec)
+			e.FileID = stx.Ino
 		}
 		return e, true, nil
 	}
@@ -47,7 +49,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	}
 }
 
-const statxMask = unix.STATX_TYPE | unix.STATX_SIZE | unix.STATX_MTIME
+const statxMask = unix.STATX_TYPE | unix.STATX_SIZE | unix.STATX_MTIME | unix.STATX_CTIME | unix.STATX_INO
 
 // noStatx is set once a kernel older than 4.11 has answered ENOSYS.
 var noStatx atomic.Bool
@@ -80,8 +82,9 @@ func statx(fd int, name []byte, stx *unix.Statx_t) error {
 		if err != nil {
 			return err
 		}
-		*stx = unix.Statx_t{Mode: uint16(st.Mode), Size: uint64(st.Size),
-			Mtime: unix.StatxTimestamp{Sec: int64(st.Mtim.Sec), Nsec: uint32(st.Mtim.Nsec)}}
+		*stx = unix.Statx_t{Mode: uint16(st.Mode), Size: uint64(st.Size), Ino: uint64(st.Ino),
+			Mtime: unix.StatxTimestamp{Sec: int64(st.Mtim.Sec), Nsec: uint32(st.Mtim.Nsec)},
+			Ctime: unix.StatxTimestamp{Sec: int64(st.Ctim.Sec), Nsec: uint32(st.Ctim.Nsec)}}
 		return nil
 	}
 }

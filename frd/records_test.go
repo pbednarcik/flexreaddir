@@ -16,6 +16,8 @@ type rec struct {
 	name         string
 	objtype      uint32
 	sec, nsec    int64
+	chg, chgNsec int64
+	fileID       uint64
 	size         int64
 }
 
@@ -41,6 +43,13 @@ func (r rec) bytes() []byte {
 		b = le.AppendUint64(b, uint64(r.sec))
 		b = le.AppendUint64(b, uint64(r.nsec))
 	}
+	if common&attrChgtime != 0 {
+		b = le.AppendUint64(b, uint64(r.chg))
+		b = le.AppendUint64(b, uint64(r.chgNsec))
+	}
+	if common&attrFileID != 0 {
+		b = le.AppendUint64(b, r.fileID)
+	}
 	if r.file&attrDataLength != 0 {
 		b = le.AppendUint64(b, uint64(r.size))
 	}
@@ -65,7 +74,7 @@ func records(rs ...rec) []byte {
 	return b
 }
 
-const every = attrName | attrError | attrObjtype | attrModtime
+const every = attrName | attrError | attrObjtype | attrModtime | attrChgtime | attrFileID
 
 func TestARegularFileCarriesItsSizeAndModificationTime(t *testing.T) {
 	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, sec: 1700000000, nsec: 123456789, size: 42})
@@ -79,8 +88,20 @@ func TestARegularFileCarriesItsSizeAndModificationTime(t *testing.T) {
 	}
 }
 
+func TestARegularFileCarriesItsChangeTimeAndFileID(t *testing.T) {
+	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, sec: 1700000000, chg: 1700000001, chgNsec: 987654321, fileID: 1 << 40, size: 42})
+	got, err := parseRecords(nil, buf, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Entry{Name: "a.go", Size: 42, ModTimeNanos: 1700000000 * 1e9, ChangeTimeNanos: 1700000001*1e9 + 987654321, FileID: 1 << 40}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("parseRecords = %+v, want [%+v]", got, want)
+	}
+}
+
 func TestOnlyARegularFileCarriesASizeAndATime(t *testing.T) {
-	buf := records(rec{common: every, name: "d", objtype: typeDir, sec: 1700000000, nsec: 1})
+	buf := records(rec{common: every, name: "d", objtype: typeDir, sec: 1700000000, nsec: 1, chg: 1700000000, fileID: 7})
 	got, err := parseRecords(nil, buf, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +168,12 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 	whole := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1})
 	nameEscapes := records(rec{common: every, name: "a.go", objtype: typeDir})
 	nameEscapes[29] = 0xff // the name's offset, after length, groups and error, now points past the record
+	cut := func(r rec, short int) []byte {
+		b := r.bytes()
+		b = b[:len(b)-short]
+		binary.LittleEndian.PutUint32(b, uint32(len(b)))
+		return b
+	}
 	for name, c := range map[string]struct {
 		buf []byte
 		n   int
@@ -155,6 +182,8 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 		"a length past the buffer":         {whole[:len(whole)-4], 1},
 		"more records claimed than held":   {whole, 2},
 		"a name outside its record":        {nameEscapes, 1},
+		"a change time cut short":          {cut(rec{common: attrChgtime}, 8), 1},
+		"a file id cut short":              {cut(rec{common: attrFileID}, 4), 1},
 	} {
 		if _, err := parseRecords(nil, c.buf, c.n); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: parseRecords error = %v, want ErrMalformed", name, err)
