@@ -138,7 +138,7 @@ func TestEveryStatTypeMapsToTheModeADirEntryWouldReport(t *testing.T) {
 
 // stated is a stat for parseDirents that gives every name it is asked about
 // a size, so a test can tell which entries were stat'ed.
-func stated([]byte) (Entry, bool, error) { return Entry{Size: 7}, true, nil }
+func stated(_ []byte, e *Entry) (bool, error) { e.Size = 7; return true, nil }
 
 func TestParseDirentsStatsOnlyWhatTheRecordTypeDoesNotSettle(t *testing.T) {
 	buf := slices.Concat(dirent("sub", dtDir), dirent("a.go", dtRegular), dirent("odd", dtUnknown))
@@ -154,11 +154,12 @@ func TestParseDirentsStatsOnlyWhatTheRecordTypeDoesNotSettle(t *testing.T) {
 
 func TestParseDirentsLeavesOutANameRemovedBeforeItsStat(t *testing.T) {
 	buf := slices.Concat(dirent("gone.go", dtRegular), dirent("kept.go", dtRegular))
-	got, err := parseDirents([]Entry{{Name: "earlier"}}, buf, func(name []byte) (Entry, bool, error) {
+	got, err := parseDirents([]Entry{{Name: "earlier"}}, buf, func(name []byte, e *Entry) (bool, error) {
 		if string(name) == "gone.go" {
-			return Entry{}, false, nil
+			e.Size = 99 // a stat that wrote before it found the name gone
+			return false, nil
 		}
-		return stated(name)
+		return stated(name, e)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,11 +172,12 @@ func TestParseDirentsLeavesOutANameRemovedBeforeItsStat(t *testing.T) {
 func TestParseDirentsStopsAtAStatError(t *testing.T) {
 	denied := errors.New("denied")
 	buf := slices.Concat(dirent("a.go", dtRegular), dirent("b.go", dtRegular), dirent("c.go", dtRegular))
-	got, err := parseDirents(nil, buf, func(name []byte) (Entry, bool, error) {
+	got, err := parseDirents(nil, buf, func(name []byte, e *Entry) (bool, error) {
 		if string(name) == "b.go" {
-			return Entry{}, false, denied
+			e.Size = 99 // a stat that wrote before it failed
+			return false, denied
 		}
-		return stated(name)
+		return stated(name, e)
 	})
 	if !errors.Is(err, denied) || !slices.Equal(got, []Entry{{Name: "a.go", Size: 7}}) {
 		t.Fatalf("parseDirents = %+v, %v; want a.go and the stat error", got, err)

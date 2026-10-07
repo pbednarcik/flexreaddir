@@ -27,8 +27,9 @@ const direntHeader = 8 + 8 + 2 + 1
 // one allocation for their names and at most one to grow dst. The record's
 // type settles every entry but a regular file or an unknown type, which stat
 // describes from the name as it lies in buf, NUL after it; stat reports false
-// for a name removed since the read.
-func parseDirents(dst []Entry, buf []byte, stat func(name []byte) (Entry, bool, error)) ([]Entry, error) {
+// for a name removed since the read. stat fills the Entry where it lies in
+// dst, so no Entry is copied on the way.
+func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (bool, error)) ([]Entry, error) {
 	nameBytes, entries := 0, 0
 	_ = eachDirent(buf, func(name []byte, _ byte) error {
 		nameBytes += len(name)
@@ -40,16 +41,15 @@ func parseDirents(dst []Entry, buf []byte, stat func(name []byte) (Entry, bool, 
 	names.grow(nameBytes)
 	err := eachDirent(buf, func(name []byte, dtype byte) error {
 		mode, known := direntMode(dtype)
-		e := Entry{Type: mode}
+		dst = append(dst, Entry{Type: mode})
+		e := &dst[len(dst)-1]
 		if !known || mode.IsRegular() {
-			stated, found, err := stat(name)
-			if !found || err != nil {
+			if found, err := stat(name, e); !found || err != nil {
+				dst = dst[:len(dst)-1]
 				return err
 			}
-			e = stated
 		}
 		e.Name = names.add(name)
-		dst = append(dst, e)
 		return nil
 	})
 	return dst, err

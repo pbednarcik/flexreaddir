@@ -18,22 +18,22 @@ const listOp = "getdents64"
 func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	fd := int(h)
 	var stx unix.Statx_t
-	stat := func(name []byte) (Entry, bool, error) {
+	stat := func(name []byte, e *Entry) (bool, error) {
 		err := statx(fd, name, &stx)
 		if errors.Is(err, syscall.ENOENT) {
-			return Entry{}, false, nil
+			return false, nil
 		}
 		if err != nil {
-			return Entry{}, false, &os.PathError{Op: "statx", Path: string(name), Err: err}
+			return false, &os.PathError{Op: "statx", Path: string(name), Err: err}
 		}
-		e := Entry{Type: statMode(uint32(stx.Mode))}
+		e.Type = statMode(uint32(stx.Mode))
 		if e.Type.IsRegular() {
 			e.Size = int64(stx.Size)
 			e.ModTimeNanos = stx.Mtime.Sec*1e9 + int64(stx.Mtime.Nsec)
 			e.ChangeTimeNanos = stx.Ctime.Sec*1e9 + int64(stx.Ctime.Nsec)
 			e.FileID = stx.Ino
 		}
-		return e, true, nil
+		return true, nil
 	}
 	for {
 		n, err := unix.Getdents(fd, buf)

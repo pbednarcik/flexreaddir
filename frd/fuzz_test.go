@@ -29,11 +29,11 @@ func FuzzRecords(f *testing.F) {
 func FuzzDirents(f *testing.F) {
 	f.Add(append(dirent(".", dtDir), dirent("a.go", dtRegular)...))
 	f.Fuzz(func(t *testing.T, buf []byte) {
-		got, _ := parseDirents(nil, buf, func(name []byte) (Entry, bool, error) {
+		got, _ := parseDirents(nil, buf, func(name []byte, _ *Entry) (bool, error) {
 			if name[:len(name)+1][len(name)] != 0 {
 				t.Fatalf("%q reached stat without its NUL after it", name)
 			}
-			return Entry{}, true, nil
+			return true, nil
 		})
 		for _, e := range got {
 			if e.Name == "" || e.Name == "." || e.Name == ".." || strings.IndexByte(e.Name, 0) >= 0 {
