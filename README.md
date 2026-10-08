@@ -51,12 +51,13 @@ Sequentially:
 
 | How | macOS | Linux (Docker) | Windows |
 |---|---:|---:|---:|
-| `filepath.Walk` | 274 ms | 107 ms | 743 ms |
-| `filepath.WalkDir`, with `d.Info()` for each file | 272 ms | 105 ms | 157 ms |
-| `os.File.ReadDir` + `Info`, one directory at a time | 255 ms | 90 ms | 128 ms |
-| [fastwalk](https://github.com/charlievieth/fastwalk) v1.0.14 with 1 worker, `d.Info()` for each file | 281 ms | 126 ms | 158 ms |
-| **FlexReadDir**, one directory at a time | **169 ms** | **70 ms** | **111 ms** |
-| Time saved against `filepath.WalkDir` | 38% | 33% | 29% |
+| `filepath.Walk` | 229 ms | 97 ms | 743 ms |
+| `filepath.WalkDir`, with `d.Info()` for each file | 224 ms | 95 ms | 157 ms |
+| `os.File.ReadDir` + `Info`, one directory at a time | 212 ms | 81 ms | 128 ms |
+| [fastwalk](https://github.com/charlievieth/fastwalk) v1.0.14 with 1 worker, `d.Info()` for each file | 238 ms | 123 ms | 158 ms |
+| [godirwalk](https://github.com/karrick/godirwalk) v1.17.0, unsorted, `os.Lstat` for each file | 378 ms | 96 ms | cannot walk |
+| **FlexReadDir**, one directory at a time | **134 ms** | **59 ms** | **111 ms** |
+| Time saved against `filepath.WalkDir` | 40% | 38% | 29% |
 
 On Windows `filepath.Walk` stands out: it makes a separate `os.Lstat` call by
 full path for every file, where the other walks take what the directory
@@ -67,19 +68,25 @@ this Mac, 18 in the container, 32 on the Windows machine) given to both:
 
 | How | macOS | Linux (Docker) | Windows |
 |---|---:|---:|---:|
-| fastwalk v1.0.14, `d.Info()` for each file | 86.0 ms | 102.0 ms | 71.7 ms |
-| [saracen/walker](https://github.com/saracen/walker) v0.1.4, its `os.FileInfo` | not measured | not measured | 53.4 ms |
-| **FlexReadDir** in a minimal worker pool | **59.3 ms** | **30.7 ms** | **28.1 ms** |
-| Time saved against fastwalk | 31% | 70% | 61% |
+| fastwalk v1.0.14, `d.Info()` for each file | 85.8 ms | 99.1 ms | 71.7 ms |
+| [saracen/walker](https://github.com/saracen/walker) v0.1.4, its `os.FileInfo` | 164 ms | 66.6 ms | 53.4 ms |
+| **FlexReadDir** in a minimal worker pool | **57.9 ms** | **26.0 ms** | **28.1 ms** |
+| Time saved against fastwalk | 33% | 74% | 61% |
 
-On Windows FlexReadDir also saves 47% against saracen/walker, with 13.7 MiB
-and 36 k allocations per walk against its 54.0 MiB and 365 k (fastwalk:
-63.6 MiB, 462 k). The three Windows rows come from one run.
+Against saracen/walker FlexReadDir saves 65% on macOS, with 7.4 MiB and 32 k
+allocations per walk against its 50.1 MiB and 534 k (fastwalk: 57.9 MiB,
+691 k); 61% in the container, with 4.6 MiB and 32 k against its 35.9 MiB and
+520 k (fastwalk: 44.8 MiB, 697 k); and 47% on Windows, with 13.7 MiB and 36 k
+against its 54.0 MiB and 365 k (fastwalk: 63.6 MiB, 462 k). On macOS
+saracen/walker is slower than fastwalk; in the container and on Windows it is
+faster. Each platform's rows come from one run.
 
-[godirwalk](https://github.com/karrick/godirwalk) v1.17.0 was tried too but
-cannot walk on Windows: its scanner reads with `os.File.Readdir(1)` and takes
-the `io.EOF` that ends every directory for an error. It reports no sizes or
-times either, so a caller would `os.Lstat` each file.
+godirwalk reports no sizes or times, so its row carries an `os.Lstat` per
+regular file, which any caller needing them would add. On macOS that makes it
+the slowest walk, at 150 MiB against the others' 53 to 66; in the container it
+matches `filepath.Walk`. On Windows v1.17.0 cannot walk at all: its scanner
+reads with `os.File.Readdir(1)` and takes the `io.EOF` that ends every
+directory for an error.
 
 FlexReadDir lists one directory and does not walk trees, so the parallel row
 uses the small worker pool in [`bench/tree_test.go`](bench/tree_test.go). fastwalk
@@ -138,7 +145,7 @@ section shows; the standard library returns a new slice every time.
 |---|---:|---:|---:|---:|---:|---:|
 | Standard library (`ReadDir` + `Info`) | 5,017 allocations, 504 KiB | 5,015 allocations, 426 KiB | 2,015 allocations, 160 KiB | 562 k allocations, 57.3 MiB | 549 k allocations, 40.9 MiB | 265 k allocations, 19.9 MiB |
 | fastwalk with 1 worker | | | | 691 k allocations, 57.8 MiB | 697 k allocations, 44.8 MiB | 460 k allocations, 31.2 MiB |
-| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **5 allocations, 12.4 KiB** | **31 k allocations, 3.3 MiB** | **31 k allocations, 2.6 MiB** | **35 k allocations, 4.0 MiB** |
+| **FlexReadDir** | **5 allocations, 11.5 KiB** | **4 allocations, 12.2 KiB** | **5 allocations, 12.4 KiB** | **31 k allocations, 3.2 MiB** | **31 k allocations, 2.6 MiB** | **35 k allocations, 4.0 MiB** |
 
 The kernel-source counts include the walk's own path joins, which every row
 pays.
@@ -152,6 +159,16 @@ one row's ten runs. Every FlexReadDir row differs from each row it is compared
 with at p = 0.000 in `benchstat`. A second complete set of 10 runs, taken
 afterwards, reproduced every median within 2% on macOS and 5% in the
 container, with the same allocation counts.
+
+The macOS kernel-source rows were retaken on 2026-10-08 at v0.3.0, with
+godirwalk and saracen/walker in the same run: ten passes of a prebuilt test
+binary, the one-minute load average between 3.7 and 6.7 with the benchmark's
+own parallel rows counted in it. The intervals of the two `filepath` rows and
+the parallel FlexReadDir row ran to ±13%, the rest within ±6%; a second
+complete set reproduced every median within 3%. The Linux rows were retaken
+the same day in the container, the same way, load 3.1 to 7.3: the three
+parallel rows' intervals ran to ±9%, the rest within ±5%, and a second set
+reproduced every median within 5%.
 
 The Windows rows were taken the same way, from a prebuilt test binary behind
 a quiet gate (total CPU under 8% for six 5-second samples; the last sample
@@ -281,10 +298,16 @@ listing it returns an error wrapping `errors.ErrUnsupported`.
 
 On the Windows machine above, a parallel walk of the kernel source with one
 kept `Lister` per worker and `AppendHandle` allocated 3.7 MiB against 19.6 MiB
-with the function `AppendDir`. In a parallel walk that matters for time too:
-fewer allocations mean fewer collections, and every collection makes the
-walk's threads queue on the Go scheduler's lock as they enter system calls
-([the rows](docs/superpowers/evidence/2026-10-07-lister.md)).
+with the function `AppendDir`; on the Mac, 3.4 MiB against 8.6 MiB. The bytes
+the pool loses are buffers dropped at collections, so a walk with the
+collector off allocates the kept figure on both machines. Whether that costs
+time depends on the platform. On Windows every collection makes the walk's
+threads queue on the Go scheduler's lock as they enter system calls, and more
+than half the wall time went there
+([the rows](docs/superpowers/evidence/2026-10-07-lister.md)). On macOS the
+same walk runs at the same speed with the collector on or off, within 2.5%:
+there it is the kernel's time, and `AppendHandle` saves only the `os.File` per
+directory ([the rows](docs/superpowers/evidence/2026-10-08-lister-macos.md)).
 
 ### `Entry`
 
