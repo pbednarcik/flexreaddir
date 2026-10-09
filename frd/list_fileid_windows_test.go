@@ -132,8 +132,8 @@ func TestARefusedFileIDClassFallsBackToTheFullListing(t *testing.T) {
 	}
 	ntfs := onNTFS(t, dir)
 	want := readDir(t, dir)
-	refuseFileID = true
-	t.Cleanup(func() { refuseFileID = false })
+	refuseFileIDWith = windows.ERROR_INVALID_PARAMETER
+	t.Cleanup(func() { refuseFileIDWith = 0 })
 	got := readDir(t, dir)
 	if len(got) != len(want) {
 		t.Fatalf("fallback listed %d entries, want %d", len(got), len(want))
@@ -149,14 +149,32 @@ func TestARefusedFileIDClassFallsBackToTheFullListing(t *testing.T) {
 	}
 }
 
+// A filesystem may refuse the class with a code no one measured (a filter
+// driver, a user-mode filesystem); the listing must still work wherever the
+// old class does.
+func TestAnyFirstCallFailureFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []syscall.Errno{windows.ERROR_INVALID_PARAMETER, windows.ERROR_CALL_NOT_IMPLEMENTED, windows.ERROR_ACCESS_DENIED} {
+		refuseFileIDWith = code
+		got := readDir(t, dir)
+		refuseFileIDWith = 0
+		if len(got) != 1 || got["a"].Size != 1 {
+			t.Errorf("refused with %v: listed %+v", code, got)
+		}
+	}
+}
+
 // An empty root's ERROR_FILE_NOT_FOUND is not a refusal.
 func TestOnlyARefusalTriggersTheFallback(t *testing.T) {
-	for _, err := range []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_NOT_SUPPORTED, windows.ERROR_INVALID_FUNCTION} {
+	for _, err := range []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_NOT_SUPPORTED, windows.ERROR_INVALID_FUNCTION, windows.ERROR_CALL_NOT_IMPLEMENTED, windows.ERROR_ACCESS_DENIED} {
 		if !refused(err) {
 			t.Errorf("%v is not taken as a refusal", err)
 		}
 	}
-	for _, err := range []error{nil, syscall.ERROR_FILE_NOT_FOUND, syscall.ERROR_NO_MORE_FILES, windows.ERROR_ACCESS_DENIED} {
+	for _, err := range []error{nil, syscall.ERROR_FILE_NOT_FOUND, syscall.ERROR_NO_MORE_FILES} {
 		if refused(err) {
 			t.Errorf("%v is taken as a refusal", err)
 		}

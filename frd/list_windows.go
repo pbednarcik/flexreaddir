@@ -8,14 +8,15 @@ import (
 
 const listOp = "GetFileInformationByHandleEx"
 
-// refuseFileID makes the first listing call behave as a volume that refuses
-// FILE_ID_EXTD_DIR_INFO, so tests run the fallback on any volume.
-var refuseFileID = false
+// refuseFileIDWith, when not 0, makes the first listing call fail with that
+// error, as a volume that refuses FILE_ID_EXTD_DIR_INFO does, so tests run the
+// fallback on any volume.
+var refuseFileIDWith syscall.Errno
 
 // readAll fills buf from the handle's current position until the kernel has
 // no more. It asks for FILE_ID_EXTD_DIR_INFO, which carries a file id; a
 // volume that refuses that class on the first call (FAT32, WSL's 9P, SMB
-// servers older than Windows Server 2025) is listed with FILE_FULL_DIR_INFO
+// servers older than Windows Server 2025), with whatever error, is listed with FILE_FULL_DIR_INFO
 // instead, and its entries carry no FileID. The class never changes once a
 // call has succeeded, since the handle's position has moved.
 // ERROR_FILE_NOT_FOUND on the first call is an empty root directory
@@ -24,8 +25,8 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	class, l := uint32(windows.FileIdExtdDirectoryInfo), idExtdDirInfo
 	for first := true; ; first = false {
 		var err error
-		if first && refuseFileID {
-			err = windows.ERROR_INVALID_PARAMETER
+		if first && refuseFileIDWith != 0 {
+			err = refuseFileIDWith
 		} else {
 			err = windows.GetFileInformationByHandleEx(windows.Handle(h), class, &buf[0], uint32(len(buf)))
 		}
@@ -45,8 +46,11 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	}
 }
 
-// refused reports whether err is how a volume says it does not serve an
-// information class.
+// refused reports whether a first call's err may be the volume refusing the
+// class: FAT32 and 9P answer ERROR_INVALID_PARAMETER, SMB servers
+// ERROR_NOT_SUPPORTED, and other filesystems may use other codes. Anything but
+// the end of the listing and an empty root is retried with the old class,
+// which fails the same way when the error was real, at the cost of one call.
 func refused(err error) bool {
-	return err == windows.ERROR_INVALID_PARAMETER || err == windows.ERROR_NOT_SUPPORTED || err == windows.ERROR_INVALID_FUNCTION
+	return err != nil && err != syscall.ERROR_NO_MORE_FILES && err != syscall.ERROR_FILE_NOT_FOUND
 }
