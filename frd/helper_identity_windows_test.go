@@ -15,7 +15,9 @@ type fileBasicInfo struct {
 	_                                                       uint32
 }
 
-// identity is name's change time and file id as its own handle reports them.
+// identity is name's change time as its own handle reports it, and the file
+// id a listing with the default class carries: none. fileIndex is the id
+// oracle for the FILE_ID_EXTD_DIR_INFO tests.
 func identity(t *testing.T, name string) (changeNanos int64, fileID uint64) {
 	t.Helper()
 	p, err := windows.UTF16PtrFromString(name)
@@ -33,5 +35,5 @@ func identity(t *testing.T, name string) (changeNanos int64, fileID uint64) {
 	if err := windows.GetFileInformationByHandleEx(h, windows.FileBasicInfo, (*byte)(unsafe.Pointer(&fbi)), uint32(unsafe.Sizeof(fbi))); err != nil {
 		t.Fatal(err)
 	}
-	return (fbi.ChangeTime - windowsEpoch) * 100, fileIndex(t, name)
+	return (fbi.ChangeTime - windowsEpoch) * 100, 0
 }

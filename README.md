@@ -209,9 +209,8 @@ Why each platform is faster:
   file is `statx`'d relative to the directory, with its name passed straight
   from the kernel's buffer. The portable way resolves the full path again and
   copies the name for every file.
-- **Windows**: the directory is read as `FILE_ID_EXTD_DIR_INFO` records (`FILE_FULL_DIR_INFO`
-  where a volume refuses that class: FAT, WSL's 9P, older SMB servers), which already
-  carry sizes, times and the file id; the standard library builds a `FileInfo`, a
+- **Windows**: the directory is read as `FILE_FULL_DIR_INFO` records, which already
+  carry sizes and times; the standard library builds a `FileInfo`, a
   name and a `DirEntry` for each, FlexReadDir one `Entry` with its name in a
   shared allocation. A junction is `fs.ModeIrregular`, as `os.ReadDir` reports
   it since Go 1.23; the pre-1.23 `winsymlink=0` setting is not honoured. Names are
@@ -366,11 +365,11 @@ filled on every platform.
 metadata, such as its permissions. It comes from `ATTR_CMN_CHGTIME` on macOS,
 `statx`'s `stx_ctime` on Linux and the listing's own `ChangeTime` on Windows,
 and is zero on the other platforms and on a Windows filesystem that keeps no
-change time. `FileID` comes from `ATTR_CMN_FILEID` on macOS, `stx_ino` on Linux
-and the listing's `FILE_ID_EXTD_DIR_INFO` `FileId` on Windows when it fits 64 bits,
-as on NTFS. It is zero where the volume gives none: ReFS and Dev Drive (128-bit ids),
-FAT, WSL's 9P and shares on servers older than Windows Server 2025. Zero means
-unknown, never equal. With
+change time. `FileID` comes from `ATTR_CMN_FILEID` on macOS and `stx_ino` on Linux,
+and is zero on Windows: the `FILE_ID_EXTD_DIR_INFO` class that carries a 64-bit id on
+NTFS costs a warm listing 5 to 9% (measured,
+`docs/superpowers/evidence/2026-10-09-fileid-windows.md`), so its parser and fallback
+are in the tree but not the default. Zero means unknown, never equal. With
 both present, a walker can tell a file replaced by another from one rewritten
 in place.
 
@@ -433,7 +432,7 @@ door, the package would stop building on macOS rather than misbehave, and
 `golang.org/x/sys` would be in the same position.
 
 The buffers the kernel fills, macOS attribute records, Linux `getdents64`
-records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
+records and Windows `FILE_FULL_DIR_INFO` (and `FILE_ID_EXTD_DIR_INFO`) records, are walked in plain,
 bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
 hold what it claims is `ErrMalformed`, never a panic. The one piece of assembly decodes
 Windows names on amd64, inside a name the Go walk has already bounded; it is fuzzed against
