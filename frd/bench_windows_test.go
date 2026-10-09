@@ -167,25 +167,6 @@ func byLength(names [][]byte) [][]byte {
 	return sorted
 }
 
-// packed copies names end to end into one block in the order given, so every
-// arm reads memory front to back: without it, sorting scatters the reads over
-// the captured buffers and a corpus larger than L2 measures cache misses
-// instead of branches.
-func packed(names [][]byte) [][]byte {
-	total := 0
-	for _, n := range names {
-		total += len(n)
-	}
-	block := make([]byte, 0, total)
-	out := make([][]byte, len(names))
-	for i, n := range names {
-		start := len(block)
-		block = append(block, n...)
-		out[i] = block[start:len(block):len(block)]
-	}
-	return out
-}
-
 // BenchmarkAppendUTF16Real decodes every name of a corpus once per iteration,
 // in kernel order, and reports the cost per name and per code unit. Names
 // are packed (see packed), so cap(name) ends at the name, as the decoder
