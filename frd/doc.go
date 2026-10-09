@@ -12,11 +12,11 @@
 // file is stat'ed with statx relative to the directory, its name passed in
 // place, where fs.DirEntry.Info resolves the whole path again and copies it.
 //
-// On Windows the directory is read as FILE_FULL_DIR_INFO records through
-// GetFileInformationByHandleEx, which carry sizes and times, so the cost the
-// package removes is the standard library's per-entry FileInfo, name and
-// DirEntry allocations. The FILE_ID_EXTD_DIR_INFO class would add the file
-// id at 5 to 9% of a warm listing, so FileID stays zero on Windows.
+// On Windows the directory is read as FILE_ID_EXTD_DIR_INFO records
+// (FILE_FULL_DIR_INFO where a volume refuses that class) through
+// GetFileInformationByHandleEx, which carry sizes, times and the file id, so
+// the cost the package removes is the standard library's per-entry FileInfo,
+// name and DirEntry allocations.
 //
 // Elsewhere AppendDir reads the directory with os.File.ReadDir and stats each
 // regular file.

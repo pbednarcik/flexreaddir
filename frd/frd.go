@@ -42,9 +42,12 @@ type Entry struct {
 	ChangeTimeNanos int64
 
 	// FileID is a regular file's number on its volume: ATTR_CMN_FILEID on
-	// darwin and statx's stx_ino on linux. It is zero on windows, where the
-	// listing class that carries an id costs a warm listing 5 to 9%, and on
-	// the platforms without a native listing. Zero means unknown, never equal.
+	// darwin, statx's stx_ino on linux, and on windows the listing's
+	// FILE_ID_EXTD_DIR_INFO FileId when it fits 64 bits, as on NTFS. It is
+	// zero where the platform or the volume gives none: ReFS and Dev Drive
+	// (128-bit ids), FAT, WSL's 9P, shares on servers older than Windows
+	// Server 2025, and the platforms without a native listing. Zero means
+	// unknown, never equal.
 	FileID uint64
 }
 

@@ -65,47 +65,50 @@ func onNTFS(t *testing.T, dir string) bool {
 	return windows.UTF16ToString(fsName[:]) == "NTFS"
 }
 
-// withFileIDClass lists with FILE_ID_EXTD_DIR_INFO for the test's duration.
-func withFileIDClass(t *testing.T) {
+// withClass lists with class for the test's duration.
+func withClass(t *testing.T, class uint32) {
 	t.Helper()
-	listClass = windows.FileIdExtdDirectoryInfo
-	t.Cleanup(func() { listClass = windows.FileFullDirectoryInfo })
+	listClass = class
+	t.Cleanup(func() { listClass = windows.FileIdExtdDirectoryInfo })
 }
 
-// The default class is FILE_FULL_DIR_INFO: it lists without FileIDs, and the
-// same directory listed with FILE_ID_EXTD_DIR_INFO agrees with it in every
-// other field. The id class costs a warm listing 5 to 9% (measured
-// 2026-10-09), which is why it is not the default.
-func TestTheDefaultClassListsWithoutFileIDs(t *testing.T) {
+// The default class is FILE_ID_EXTD_DIR_INFO (Peter's ruling of 2026-10-09:
+// the identity is worth the measured 5 to 9% of a warm listing). The same
+// directory listed with FILE_FULL_DIR_INFO carries no FileID and agrees in
+// every other field.
+func TestTheFullClassListsTheSameWithoutFileIDs(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"a", "b"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if listClass != windows.FileFullDirectoryInfo {
-		t.Fatalf("the default class is %d, want FILE_FULL_DIR_INFO (%d)", listClass, windows.FileFullDirectoryInfo)
+	if listClass != windows.FileIdExtdDirectoryInfo {
+		t.Fatalf("the default class is %d, want FILE_ID_EXTD_DIR_INFO (%d)", listClass, windows.FileIdExtdDirectoryInfo)
 	}
-	got := readDir(t, dir)
-	withFileIDClass(t)
+	ntfs := onNTFS(t, dir)
 	want := readDir(t, dir)
+	withClass(t, windows.FileFullDirectoryInfo)
+	got := readDir(t, dir)
 	if len(got) != len(want) {
-		t.Fatalf("default class listed %d entries, id class %d", len(got), len(want))
+		t.Fatalf("full class listed %d entries, id class %d", len(got), len(want))
 	}
 	for n, e := range got {
 		if e.FileID != 0 {
-			t.Errorf("%s: the default class lists a FileID %#x", n, e.FileID)
+			t.Errorf("%s: the full class lists a FileID %#x", n, e.FileID)
 		}
 		w := want[n]
+		if ntfs && w.FileID == 0 {
+			t.Errorf("%s: the default class lists no FileID on NTFS", n)
+		}
 		w.FileID = 0
 		if e != w {
-			t.Errorf("%s: default class %+v, id class %+v", n, e, w)
+			t.Errorf("%s: full class %+v, id class %+v", n, e, w)
 		}
 	}
 }
 
 func TestWindowsFileIDIsTheFilesOwnID(t *testing.T) {
-	withFileIDClass(t)
 	dir := t.TempDir()
 	if !onNTFS(t, dir) {
 		t.Skip("the temporary directory is not on NTFS")
@@ -142,7 +145,6 @@ func TestWindowsFileIDIsTheFilesOwnID(t *testing.T) {
 
 // Every buffer of a big listing uses the class the first one did.
 func TestEveryFileOfABigDirectoryCarriesItsID(t *testing.T) {
-	withFileIDClass(t)
 	dir := t.TempDir()
 	if !onNTFS(t, dir) {
 		t.Skip("the temporary directory is not on NTFS")
@@ -165,7 +167,6 @@ func TestEveryFileOfABigDirectoryCarriesItsID(t *testing.T) {
 }
 
 func TestARefusedFileIDClassFallsBackToTheFullListing(t *testing.T) {
-	withFileIDClass(t)
 	dir := t.TempDir()
 	for _, n := range []string{"a", "b"} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644); err != nil {
@@ -195,7 +196,6 @@ func TestARefusedFileIDClassFallsBackToTheFullListing(t *testing.T) {
 // driver, a user-mode filesystem); the listing must still work wherever the
 // old class does.
 func TestAnyFirstCallFailureFallsBack(t *testing.T) {
-	withFileIDClass(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,6 @@ func TestOnlyARefusalTriggersTheFallback(t *testing.T) {
 // A FAT volume refuses FILE_ID_EXTD_DIR_INFO (measured 2026-10-09). Set
 // FRD_FAT_DIR to a directory on one to run this.
 func TestAFATVolumeListsWithoutFileIDs(t *testing.T) {
-	withFileIDClass(t)
 	dir := os.Getenv("FRD_FAT_DIR")
 	if dir == "" {
 		t.Skip("FRD_FAT_DIR is not set")

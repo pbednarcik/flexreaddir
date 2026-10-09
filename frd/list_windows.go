@@ -8,12 +8,13 @@ import (
 
 const listOp = "GetFileInformationByHandleEx"
 
-// listClass is the information class a listing asks for. FILE_FULL_DIR_INFO
-// is the default. FILE_ID_EXTD_DIR_INFO fills Entry.FileID, but its 20 more
-// bytes per record cost a warm NTFS listing 5 to 9% (measured 2026-10-09,
-// docs/superpowers/evidence/2026-10-09-fileid-windows.md); its parser and
-// fallback stay, and the tests select it.
-var listClass uint32 = windows.FileFullDirectoryInfo
+// listClass is the information class a listing asks for. FILE_ID_EXTD_DIR_INFO
+// is the default: it fills Entry.FileID, and its 20 more bytes per record cost
+// a warm NTFS listing 5 to 9% (measured 2026-10-09,
+// docs/superpowers/evidence/2026-10-09-fileid-windows.md), a price Peter
+// accepted for the identity. FILE_FULL_DIR_INFO is the fallback, and the
+// tests' comparison.
+var listClass uint32 = windows.FileIdExtdDirectoryInfo
 
 // refuseFileIDWith, when not 0, makes the first listing call fail with that
 // error, as a volume that refuses FILE_ID_EXTD_DIR_INFO does, so tests run the
