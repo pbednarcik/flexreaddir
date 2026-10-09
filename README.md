@@ -214,7 +214,10 @@ Why each platform is faster:
   carry sizes, times and the file id; the standard library builds a `FileInfo`, a
   name and a `DirEntry` for each, FlexReadDir one `Entry` with its name in a
   shared allocation. A junction is `fs.ModeIrregular`, as `os.ReadDir` reports
-  it since Go 1.23; the pre-1.23 `winsymlink=0` setting is not honoured.
+  it since Go 1.23; the pre-1.23 `winsymlink=0` setting is not honoured. Names are
+  decoded from UTF-16 thirty-two characters at a time with AVX2, sixteen with SSE2 on any
+  other amd64, and one at a time in Go elsewhere and with `-tags purego`; all three are
+  tested against each other.
 - **macOS, Linux and Windows**: all the names from one kernel read share a
   single allocation and the result grows once per read, so a listing allocates
   a handful of times whatever its size.
@@ -426,9 +429,11 @@ door, the package would stop building on macOS rather than misbehave, and
 `golang.org/x/sys` would be in the same position.
 
 The buffers the kernel fills, macOS attribute records, Linux `getdents64`
-records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are parsed in plain,
+records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
 bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
-hold what it claims is `ErrMalformed`, never a panic. Windows needs no
+hold what it claims is `ErrMalformed`, never a panic. The one piece of assembly decodes
+Windows names on amd64, inside a name the Go walk has already bounded; it is fuzzed against
+the Go decoder, which `-tags purego` selects. Windows needs no
 trampoline: `GetFileInformationByHandleEx` comes from `golang.org/x/sys/windows`.
 
 ## Status

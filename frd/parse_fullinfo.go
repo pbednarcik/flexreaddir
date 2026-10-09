@@ -6,6 +6,7 @@ import (
 	"slices"
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // File attribute bits and reparse tags from <winnt.h>.
@@ -48,8 +49,8 @@ func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 	})
 	dst = slices.Grow(dst, entries)
 	var names nameBlock
-	names.grow(units)         // exact for ASCII names; a name that needs more UTF-8 grows the block once more
-	var scratch [3 * 255]byte // a Windows name is at most 255 units of at most 3 bytes each
+	names.grow(units)            // exact for ASCII names; a name that needs more UTF-8 grows the block once more
+	var scratch [3*255 + 32]byte // a Windows name is at most 255 units of at most 3 bytes each, and asciiRun may write 32 past them
 	err := eachFullInfo(buf, l, func(r fullInfo) error {
 		name, ok := appendUTF16(scratch[:0], r.name)
 		if !ok {
@@ -159,10 +160,25 @@ func attrMode(attrs, tag uint32) fs.FileMode {
 }
 
 // appendUTF16 appends the UTF-16LE units in u to b as UTF-8, reporting false
-// at a NUL unit, which no Windows name holds. An unpaired surrogate becomes
-// U+FFFD, as in syscall.UTF16ToString, so a name agrees with os.ReadDir's
-// byte for byte.
+// at a NUL unit, which no Windows name holds. A leading run of units 1 to
+// 0x7F is packed by asciiRun with the widest tier the CPU has; asciiRun may
+// read to cap(u) and write 32 bytes past the last unit it packs, which the
+// Grow below makes room for. The rest goes through appendUTF16Scalar.
 func appendUTF16(b, u []byte) ([]byte, bool) {
+	if units := len(u) / 2; units >= 4 {
+		b = slices.Grow(b, units+32)
+		n := asciiRun(unsafe.SliceData(b[len(b):cap(b)]), unsafe.SliceData(u), units, cap(u))
+		b = b[:len(b)+n]
+		u = u[2*n:]
+	}
+	return appendUTF16Scalar(b, u)
+}
+
+// appendUTF16Scalar is the Go tier and the reference the others are tested
+// against: it appends the UTF-16LE units in u to b as UTF-8, one at a time,
+// reporting false at a NUL unit. An unpaired surrogate becomes U+FFFD, as in
+// syscall.UTF16ToString, so a name agrees with os.ReadDir's byte for byte.
+func appendUTF16Scalar(b, u []byte) ([]byte, bool) {
 	le := binary.LittleEndian
 	for i := 0; i+1 < len(u); i += 2 {
 		c := rune(le.Uint16(u[i:]))

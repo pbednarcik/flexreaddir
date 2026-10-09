@@ -23,6 +23,12 @@ jobs:
           go-version: ${{ matrix.go }}
       - run: go vet ./...
       - run: go test -race -count=1 ./...
+      - name: test the Go decoder tier
+        run: go test -tags purego -count=1 ./frd
+      - name: test without AVX2
+        run: go test -count=1 ./frd
+        env:
+          GODEBUG: cpu.avx2=off
       - name: test without cgo
         if: runner.os != 'Windows'
         run: CGO_ENABLED=0 go test -count=1 ./...
@@ -64,3 +70,4 @@ jobs:
       - run: go test -run '^$' -fuzz '^FuzzRecords$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzDirents$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzFullInfo$' -fuzztime 30s ./frd
+      - run: go test -run '^$' -fuzz '^FuzzAppendUTF16$' -fuzztime 30s ./frd
