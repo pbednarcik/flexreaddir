@@ -138,7 +138,7 @@ func BenchmarkParseFullInfo(b *testing.B) {
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := parseFullInfo(dst[:0], buf); err != nil {
+		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo); err != nil {
 			b.Fatal(err)
 		}
 	}

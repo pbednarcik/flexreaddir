@@ -36,14 +36,18 @@ type Entry struct {
 	// ChangeTimeNanos is a regular file's status change time in nanoseconds
 	// since the Unix epoch, which every write and every change to the file's
 	// metadata moves: st_ctime as ATTR_CMN_CHGTIME on darwin and statx's
-	// stx_ctime on linux, which no unix call sets; FILE_FULL_DIR_INFO's
+	// stx_ctime on linux, which no unix call sets; the listing's own
 	// ChangeTime on windows, which SetFileInformationByHandle can set; and
 	// zero on the other platforms, whose arms do not read it.
 	ChangeTimeNanos int64
 
 	// FileID is a regular file's number on its volume: ATTR_CMN_FILEID on
-	// darwin, statx's stx_ino on linux, and zero on windows, whose listing
-	// call does not return it, and on the other platforms.
+	// darwin, statx's stx_ino on linux, and on windows the listing's
+	// FILE_ID_EXTD_DIR_INFO FileId when it fits 64 bits, as on NTFS. It is
+	// zero where the platform or the volume gives none: ReFS and Dev Drive
+	// (128-bit ids), FAT, WSL's 9P, shares on servers older than Windows
+	// Server 2025, and the platforms without a native listing. Zero means
+	// unknown, never equal.
 	FileID uint64
 }
 

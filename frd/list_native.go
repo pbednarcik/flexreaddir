@@ -55,6 +55,8 @@ func (l *Lister) appendHandle(dst []Entry, fd uintptr, name string) ([]Entry, er
 
 func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 	if l.buf == nil {
+		// Heap-allocated, so 8-byte aligned: every Windows listing class
+		// requires it (ERROR_NOACCESS otherwise).
 		l.buf = make([]byte, bufferBytes)
 	}
 	return readAll(dst, fd, l.buf)

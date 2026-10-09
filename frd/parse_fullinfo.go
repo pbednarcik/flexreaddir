@@ -20,19 +20,28 @@ const (
 	tagSurrogate  = 0x20000000 // the bit IsReparseTagNameSurrogate tests
 )
 
-// fullInfoHeader is FILE_FULL_DIR_INFO up to FileName.
-const fullInfoHeader = 68
+// layout says where a directory record's fixed part ends and where its
+// reparse tag and file id sit. FILE_FULL_DIR_INFO has no file id and carries
+// the reparse tag in its EaSize slot, as os/types_windows.go reads it;
+// FILE_ID_EXTD_DIR_INFO has a real EaSize at 64, the tag at 68 and a 128-bit
+// FileId at 72. id is 0 where the layout has none.
+type layout struct{ header, tag, id int }
+
+var (
+	fullDirInfo   = layout{header: 68, tag: 64}
+	idExtdDirInfo = layout{header: 88, tag: 68, id: 72}
+)
 
 // windowsEpoch is 1601-01-01, the FILETIME origin, in 100 ns units before the
 // Unix epoch.
 const windowsEpoch = 116444736000000000
 
-// parseFullInfo appends an Entry for each FILE_FULL_DIR_INFO record chained
-// in buf, with one allocation for their names and at most one to grow dst. On
-// a malformed record it returns the entries before it with the error.
-func parseFullInfo(dst []Entry, buf []byte) ([]Entry, error) {
+// parseFullInfo appends an Entry for each record of layout l chained in buf,
+// with one allocation for their names and at most one to grow dst. On a
+// malformed record it returns the entries before it with the error.
+func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 	units, entries := 0, 0
-	_ = eachFullInfo(buf, func(r fullInfo) error {
+	_ = eachFullInfo(buf, l, func(r fullInfo) error {
 		units += len(r.name) / 2
 		entries++
 		return nil
@@ -41,14 +50,14 @@ func parseFullInfo(dst []Entry, buf []byte) ([]Entry, error) {
 	var names nameBlock
 	names.grow(units)         // exact for ASCII names; a name that needs more UTF-8 grows the block once more
 	var scratch [3 * 255]byte // a Windows name is at most 255 units of at most 3 bytes each
-	err := eachFullInfo(buf, func(r fullInfo) error {
+	err := eachFullInfo(buf, l, func(r fullInfo) error {
 		name, ok := appendUTF16(scratch[:0], r.name)
 		if !ok {
 			return ErrMalformed // a NUL unit; no Windows name holds one
 		}
 		e := Entry{Name: names.add(name), Type: attrMode(r.attrs, r.tag)}
 		if e.Type.IsRegular() {
-			e.Size, e.ModTimeNanos = r.size, (r.writeTime-windowsEpoch)*100
+			e.Size, e.ModTimeNanos, e.FileID = r.size, (r.writeTime-windowsEpoch)*100, r.fileID
 			if r.changeTime != 0 { // zero: a filesystem that keeps no change time
 				e.ChangeTimeNanos = (r.changeTime - windowsEpoch) * 100
 			}
@@ -65,43 +74,49 @@ type fullInfo struct {
 	attrs      uint32
 	tag        uint32
 	size       int64
-	writeTime  int64 // FILETIME
-	changeTime int64 // FILETIME
+	writeTime  int64  // FILETIME
+	changeTime int64  // FILETIME
+	fileID     uint64 // the FileId's low half when its high half is 0, else 0
 }
 
 // eachFullInfo calls visit for every record chained in buf except "." and
 // "..", stopping at the first error visit returns. Records are chained by
 // NextEntryOffset and the last one's is zero; the bytes after it are whatever
 // the buffer held before. The name's units are the visitor's to check.
-func eachFullInfo(buf []byte, visit func(fullInfo) error) error {
+func eachFullInfo(buf []byte, l layout, visit func(fullInfo) error) error {
 	le := binary.LittleEndian
 	for {
-		if len(buf) < fullInfoHeader {
+		if len(buf) < l.header {
 			return ErrMalformed
 		}
 		next := int(le.Uint32(buf))
 		nameLen := int(le.Uint32(buf[60:]))
-		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-fullInfoHeader {
+		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-l.header {
 			return ErrMalformed
 		}
-		name := buf[fullInfoHeader : fullInfoHeader+nameLen]
+		name := buf[l.header : l.header+nameLen]
 		if !dotOrDotDot(name) {
-			err := visit(fullInfo{
+			r := fullInfo{
 				name:       name,
 				attrs:      le.Uint32(buf[56:]),
-				tag:        le.Uint32(buf[64:]),
+				tag:        le.Uint32(buf[l.tag:]),
 				size:       int64(le.Uint64(buf[40:])),
 				writeTime:  int64(le.Uint64(buf[24:])),
 				changeTime: int64(le.Uint64(buf[32:])),
-			})
-			if err != nil {
+			}
+			// A 128-bit id (ReFS, Dev Drive) or the all-ones "unknown" does
+			// not fit FileID; 0 says unknown, never a truncated id.
+			if l.id != 0 && le.Uint64(buf[l.id+8:]) == 0 {
+				r.fileID = le.Uint64(buf[l.id:])
+			}
+			if err := visit(r); err != nil {
 				return err
 			}
 		}
 		if next == 0 {
 			return nil
 		}
-		if next < fullInfoHeader+nameLen || next > len(buf) {
+		if next < l.header+nameLen || next > len(buf) {
 			return ErrMalformed
 		}
 		buf = buf[next:]

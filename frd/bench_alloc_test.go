@@ -98,7 +98,7 @@ func TestParseFullInfoAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 	buf := hundredFullInfos()
 	dst := make([]Entry, 0, 100)
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseFullInfo(dst[:0], buf); err != nil {
+		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -110,7 +110,7 @@ func TestParseFullInfoAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 	buf := hundredFullInfos()
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseFullInfo(nil, buf); err != nil {
+		if _, err := parseFullInfo(nil, buf, idExtdDirInfo); err != nil {
 			t.Fatal(err)
 		}
 	})

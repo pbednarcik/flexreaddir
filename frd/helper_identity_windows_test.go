@@ -15,8 +15,7 @@ type fileBasicInfo struct {
 	_                                                       uint32
 }
 
-// identity is name's change time as its own handle reports it, and no file
-// id: the Windows listing does not return one.
+// identity is name's change time and file id as its own handle reports them.
 func identity(t *testing.T, name string) (changeNanos int64, fileID uint64) {
 	t.Helper()
 	p, err := windows.UTF16PtrFromString(name)
@@ -34,5 +33,5 @@ func identity(t *testing.T, name string) (changeNanos int64, fileID uint64) {
 	if err := windows.GetFileInformationByHandleEx(h, windows.FileBasicInfo, (*byte)(unsafe.Pointer(&fbi)), uint32(unsafe.Sizeof(fbi))); err != nil {
 		t.Fatal(err)
 	}
-	return (fbi.ChangeTime - windowsEpoch) * 100, 0
+	return (fbi.ChangeTime - windowsEpoch) * 100, fileIndex(t, name)
 }

@@ -19,7 +19,7 @@ var realDirs = []struct{ name, path string }{
 	{"winsxs", `C:\Windows\WinSxS`},
 }
 
-// captureFullInfo returns every FILE_FULL_DIR_INFO buffer the kernel fills
+// captureFullInfo returns every FILE_ID_EXTD_DIR_INFO buffer the kernel fills
 // for dir, each in its own 64 KiB slice, as readAll would see them.
 func captureFullInfo(tb testing.TB, dir string) [][]byte {
 	tb.Helper()
@@ -28,7 +28,7 @@ func captureFullInfo(tb testing.TB, dir string) [][]byte {
 	var bufs [][]byte
 	for {
 		buf := make([]byte, bufferBytes)
-		err := windows.GetFileInformationByHandleEx(windows.Handle(fd), windows.FileFullDirectoryInfo, &buf[0], uint32(len(buf)))
+		err := windows.GetFileInformationByHandleEx(windows.Handle(fd), windows.FileIdExtdDirectoryInfo, &buf[0], uint32(len(buf)))
 		if err == syscall.ERROR_NO_MORE_FILES {
 			return bufs
 		}
@@ -45,7 +45,7 @@ func realNames(tb testing.TB, bufs [][]byte) [][]byte {
 	tb.Helper()
 	var names [][]byte
 	for _, buf := range bufs {
-		if err := eachFullInfo(buf, func(r fullInfo) error {
+		if err := eachFullInfo(buf, idExtdDirInfo, func(r fullInfo) error {
 			names = append(names, r.name)
 			return nil
 		}); err != nil {
@@ -83,7 +83,7 @@ func fixedNames(n int) [][]byte {
 		rs[i] = finfo{name: fmt.Sprintf("file%04d.go", i), attrs: 0x20}
 	}
 	var names [][]byte
-	_ = eachFullInfo(finfos(rs...), func(r fullInfo) error {
+	_ = eachFullInfo(finfos(rs...), idExtdDirInfo, func(r fullInfo) error {
 		names = append(names, r.name)
 		return nil
 	})
@@ -108,7 +108,7 @@ func BenchmarkParseFullInfoReal(b *testing.B) {
 				dst = dst[:0]
 				for _, buf := range bufs {
 					var err error
-					if dst, err = parseFullInfo(dst, buf); err != nil {
+					if dst, err = parseFullInfo(dst, buf, idExtdDirInfo); err != nil {
 						b.Fatal(err)
 					}
 				}
