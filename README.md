@@ -215,9 +215,13 @@ Why each platform is faster:
   name and a `DirEntry` for each, FlexReadDir one `Entry` with its name in a
   shared allocation. A junction is `fs.ModeIrregular`, as `os.ReadDir` reports
   it since Go 1.23; the pre-1.23 `winsymlink=0` setting is not honoured. Names are
-  decoded from UTF-16 thirty-two characters at a time with AVX2, sixteen with SSE2 on any
+  decoded from UTF-16 thirty-two units at a time with AVX2, sixteen with SSE2 on any
   other amd64, and one at a time in Go elsewhere and with `-tags purego`; all three are
-  tested against each other.
+  tested against each other. Measured on a Ryzen 9 9950X, the kernels decode WinSxS's
+  long names four to five times faster than the Go loop and take 17 to 20% off a warm
+  listing of that directory, 6 to 7% off System32's; short names (eleven units) stay on
+  the Go loop and cost about a fifth more in the kernel build
+  (`docs/superpowers/evidence/2026-10-09-simd-decoder.md`).
 - **macOS, Linux and Windows**: all the names from one kernel read share a
   single allocation and the result grows once per read, so a listing allocates
   a handful of times whatever its size.
