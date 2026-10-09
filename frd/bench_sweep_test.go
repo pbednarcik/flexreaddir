@@ -9,7 +9,8 @@ import (
 // arm reads memory front to back: without it, sorting scatters the reads over
 // the captured buffers and a corpus larger than L2 measures cache misses
 // instead of branches. cap(name) ends at the name, as the decoder may not
-// assume more.
+// assume more; a kernel step that reads 32 bytes cannot run on a name of
+// fewer than sixteen units packed this way.
 func packed(names [][]byte) [][]byte {
 	total := 0
 	for _, n := range names {
@@ -25,8 +26,26 @@ func packed(names [][]byte) [][]byte {
 	return out
 }
 
+// packedSlack is packed with every name's cap running to the end of the
+// block, which has 64 bytes to spare: the shape a kernel buffer gives, where
+// the records after a name are readable and a kernel step may run on it.
+func packedSlack(names [][]byte) [][]byte {
+	total := 0
+	for _, n := range names {
+		total += len(n)
+	}
+	block := make([]byte, 0, total+64)
+	out := make([][]byte, len(names))
+	for i, n := range names {
+		start := len(block)
+		block = append(block, n...)
+		out[i] = block[start:]
+	}
+	return out
+}
+
 // sweepNames is n distinct names of exactly units ASCII units each, as
-// UTF-16LE, packed.
+// UTF-16LE, not packed.
 func sweepNames(n, units int) [][]byte {
 	names := make([][]byte, n)
 	for i := range names {
@@ -37,35 +56,42 @@ func sweepNames(n, units int) [][]byte {
 		}
 		names[i] = u
 	}
-	return packed(names)
+	return names
 }
 
 // BenchmarkAppendUTF16Sweep decodes names of one fixed length, 4 to 24 units,
-// on every tier this binary has, for the length at which a kernel call starts
-// to pay for itself. The go tier of the native binary is the dispatch with no
-// kernel; under -tags purego the only tier is the scalar loop with no
-// dispatch, the reference the native go tier is read against.
+// on every tier this binary has, in two cap shapes: tight (cap ends at the
+// name) and slack (the kernel buffer's shape), for the length at which a
+// kernel call pays for itself. The go tier of the native binary is the
+// dispatch with no kernel; under -tags purego the only tier is the scalar
+// loop with no dispatch, the reference the native go tier is read against.
 func BenchmarkAppendUTF16Sweep(b *testing.B) {
+	shapes := []struct {
+		name string
+		pack func([][]byte) [][]byte
+	}{{"tight", packed}, {"slack", packedSlack}}
 	for units := 4; units <= 24; units++ {
-		names := sweepNames(4096, units)
-		forEachTier(b, func(tier string) {
-			b.Run(fmt.Sprintf("units=%02d/tier=%s", units, tier), func(b *testing.B) {
-				var scratch [3*255 + 32]byte
-				sink := 0
-				for b.Loop() {
-					for _, n := range names {
-						out, ok := appendUTF16(scratch[:0], n)
-						if !ok {
-							b.Fatalf("NUL unit in %q", n)
+		for _, shape := range shapes {
+			names := shape.pack(sweepNames(4096, units))
+			forEachTier(b, func(tier string) {
+				b.Run(fmt.Sprintf("units=%02d/cap=%s/tier=%s", units, shape.name, tier), func(b *testing.B) {
+					var scratch [3*255 + 32]byte
+					sink := 0
+					for b.Loop() {
+						for _, n := range names {
+							out, ok := appendUTF16(scratch[:0], n)
+							if !ok {
+								b.Fatalf("NUL unit in %q", n)
+							}
+							sink += len(out)
 						}
-						sink += len(out)
 					}
-				}
-				if sink == 0 {
-					b.Fatal("decoded nothing")
-				}
-				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(names)), "ns/name")
+					if sink == 0 {
+						b.Fatal("decoded nothing")
+					}
+					b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(names)), "ns/name")
+				})
 			})
-		})
+		}
 	}
 }
