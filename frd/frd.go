@@ -71,10 +71,11 @@ var ErrMalformed = errors.New("frd: malformed directory buffer")
 // fs.ErrClosed and a nil one as os.ErrInvalid, as os.File's methods report
 // them.
 //
-// AppendDir is safe to call from many goroutines at once. It borrows the
-// buffer the kernel fills from a sync.Pool, which may drop its buffers at any
-// garbage collection. A walker that lists many directories keeps a Lister
-// instead, one per goroutine.
+// AppendDir is safe to call from many goroutines at once, each with its own
+// dir; two calls on one dir share its offset and split its entries between
+// them. It borrows the buffer the kernel fills from a sync.Pool, which may
+// drop its buffers at any garbage collection. A walker that lists many
+// directories keeps a Lister instead, one per goroutine.
 func AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDir(dst, dir)
 }
@@ -94,7 +95,9 @@ func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 // used only in errors, as os.NewFile uses it.
 //
 // AppendHandle does not close the handle or change its mode, and the caller
-// must not close it during the call. On platforms without a native listing
+// must not close it during the call. A handle taken from os.File.Fd needs
+// that File kept reachable until the call returns, since the File's
+// finalizer closes it. On platforms without a native listing
 // it returns an *os.PathError wrapping errors.ErrUnsupported.
 func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error) {
 	return l.appendHandle(dst, fd, name)
