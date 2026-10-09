@@ -290,8 +290,8 @@ func BenchmarkSortListing(b *testing.B) {
 		name string
 		sort func([]Entry)
 	}{
-		{"pdqsort", SortByName},
-		{"stable", func(s []Entry) { slices.SortStableFunc(s, CompareName) }},
+		{"pdqsort", func(s []Entry) { slices.SortFunc(s, CompareName) }},
+		{"stable", SortByName},
 		{"natural-merge", naturalMergeSort},
 	}
 	for _, d := range realDirs {
