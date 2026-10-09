@@ -230,3 +230,98 @@ func BenchmarkAppendUTF16Real(b *testing.B) {
 		})
 	}
 }
+
+// naturalMergeSort finds the ascending runs already in s and merges
+// neighbours pairwise through one buffer, allocated only when s is not
+// sorted. It is a benchmark arm, not the package's sort.
+func naturalMergeSort(s []Entry) {
+	var buf []Entry
+	for {
+		merged := false
+		for lo := 0; lo < len(s); {
+			mid := runEnd(s, lo)
+			if mid == len(s) {
+				break
+			}
+			hi := runEnd(s, mid)
+			if buf == nil {
+				buf = make([]Entry, len(s))
+			}
+			mergeInto(buf[lo:hi], s[lo:mid], s[mid:hi])
+			copy(s[lo:hi], buf[lo:hi])
+			merged = true
+			lo = hi
+		}
+		if !merged {
+			return
+		}
+	}
+}
+
+func runEnd(s []Entry, lo int) int {
+	i := lo + 1
+	for i < len(s) && CompareName(s[i-1], s[i]) <= 0 {
+		i++
+	}
+	return i
+}
+
+func mergeInto(dst, a, b []Entry) {
+	i, j, k := 0, 0, 0
+	for i < len(a) && j < len(b) {
+		if CompareName(b[j], a[i]) < 0 {
+			dst[k], j = b[j], j+1
+		} else {
+			dst[k], i = a[i], i+1
+		}
+		k++
+	}
+	k += copy(dst[k:], a[i:])
+	copy(dst[k:], b[j:])
+}
+
+// BenchmarkSortListing sorts real listings, in the order the kernel returned
+// them, with three sorts. NTFS returns names in its own case-insensitive
+// order, which byte order breaks wherever case or a character between the
+// cases ("_") differs: System32's mixed-case names into many runs, WinSxS's
+// mostly lower-case ones into few.
+func BenchmarkSortListing(b *testing.B) {
+	sorts := []struct {
+		name string
+		sort func([]Entry)
+	}{
+		{"pdqsort", SortByName},
+		{"stable", func(s []Entry) { slices.SortStableFunc(s, CompareName) }},
+		{"natural-merge", naturalMergeSort},
+	}
+	for _, d := range realDirs {
+		f, err := os.Open(d.path)
+		if err != nil {
+			b.Logf("skipping %s: %v", d.name, err)
+			continue
+		}
+		orig, err := AppendDir(nil, f)
+		f.Close()
+		if err != nil {
+			b.Fatal(err)
+		}
+		check := slices.Clone(orig)
+		SortByName(check)
+		for _, s := range sorts {
+			b.Run("dir="+d.name+"/sort="+s.name, func(b *testing.B) {
+				work := make([]Entry, len(orig))
+				copy(work, orig)
+				s.sort(work)
+				if !slices.Equal(work, check) {
+					b.Fatalf("%s sorts differently from SortByName", s.name)
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					copy(work, orig)
+					s.sort(work)
+				}
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(orig)), "ns/entry")
+			})
+		}
+	}
+}
