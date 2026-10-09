@@ -1,7 +1,11 @@
-# FlexReadDir
+<div align="center">
+
+<img src=".github/assets/logo.svg" alt="FlexReadDir" width="480">
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/pbednarcik/flexreaddir/frd.svg)](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd)
 [![CI](https://github.com/pbednarcik/flexreaddir/actions/workflows/ci.yml/badge.svg)](https://github.com/pbednarcik/flexreaddir/actions/workflows/ci.yml)
+
+</div>
 
 List a directory with the size and modification time of every regular file,
 in one pass, as fast as each platform allows. No cgo on any platform.
