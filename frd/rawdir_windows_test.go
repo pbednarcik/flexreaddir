@@ -7,9 +7,9 @@ import (
 )
 
 // openRaw opens path as a bare handle, without an os.File, the way a walker
-// that manages its own handles would. FILE_FLAG_BACKUP_SEMANTICS is what
-// lets CreateFile open a directory.
-func openRaw(tb testing.TB, path string) (uintptr, func() error) {
+// that manages its own handles would; closeRaw closes it.
+// FILE_FLAG_BACKUP_SEMANTICS is what lets CreateFile open a directory.
+func openRaw(tb testing.TB, path string) uintptr {
 	tb.Helper()
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -21,5 +21,7 @@ func openRaw(tb testing.TB, path string) (uintptr, func() error) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	return uintptr(h), func() error { return windows.CloseHandle(h) }
+	return uintptr(h)
 }
+
+func closeRaw(h uintptr) error { return windows.CloseHandle(windows.Handle(h)) }

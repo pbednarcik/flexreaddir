@@ -20,16 +20,15 @@ func TestAppendHandleAllocatesOnlyTheNames(t *testing.T) {
 		}
 	}
 	openClose := testing.AllocsPerRun(50, func() {
-		_, closeFd := openRaw(t, dir)
-		closeFd()
+		closeRaw(openRaw(t, dir))
 	})
 	var l Lister
 	entries := make([]Entry, 0, 200)
 	withList := testing.AllocsPerRun(50, func() {
-		fd, closeFd := openRaw(t, dir)
+		fd := openRaw(t, dir)
 		var err error
 		entries, err = l.AppendHandle(entries[:0], fd, dir)
-		closeFd()
+		closeRaw(fd)
 		if err != nil || len(entries) != 100 {
 			t.Fatal(len(entries), err)
 		}

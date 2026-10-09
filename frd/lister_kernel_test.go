@@ -12,8 +12,8 @@ import (
 
 func TestAppendHandleListsWhatAppendDirLists(t *testing.T) {
 	dir := listerTree(t)
-	fd, closeFd := openRaw(t, dir)
-	defer closeFd()
+	fd := openRaw(t, dir)
+	defer closeRaw(fd)
 	var l Lister
 	entries, err := l.AppendHandle(nil, fd, dir)
 	if err != nil {
@@ -29,11 +29,11 @@ func TestAppendHandleListsWhatAppendDirLists(t *testing.T) {
 // handle is still the caller's to close.
 func TestAppendHandleLeavesTheHandleOpenAtItsEnd(t *testing.T) {
 	dir := listerTree(t)
-	fd, closeFd := openRaw(t, dir)
+	fd := openRaw(t, dir)
 	closed := false
 	t.Cleanup(func() {
 		if !closed {
-			closeFd()
+			closeRaw(fd)
 		}
 	})
 	var l Lister
@@ -45,7 +45,7 @@ func TestAppendHandleLeavesTheHandleOpenAtItsEnd(t *testing.T) {
 		t.Fatalf("second AppendHandle = %d entries, %v; want none and no error", len(again), err)
 	}
 	closed = true
-	if err := closeFd(); err != nil {
+	if err := closeRaw(fd); err != nil {
 		t.Fatalf("closing the handle after AppendHandle: %v", err)
 	}
 }
@@ -55,8 +55,8 @@ func TestAppendHandleOnAFileIsAPathErrorNamingIt(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	fd, closeFd := openRaw(t, file)
-	defer closeFd()
+	fd := openRaw(t, file)
+	defer closeRaw(fd)
 	var l Lister
 	_, err := l.AppendHandle(nil, fd, file)
 	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != file || pe.Op != listOp {
@@ -73,9 +73,9 @@ func TestAListerAllocatesItsBufferOnce(t *testing.T) {
 	var first *byte
 	for range 3 {
 		dir := listerTree(t)
-		fd, closeFd := openRaw(t, dir)
+		fd := openRaw(t, dir)
 		_, err := l.AppendHandle(nil, fd, dir)
-		closeFd()
+		closeRaw(fd)
 		if err != nil {
 			t.Fatal(err)
 		}

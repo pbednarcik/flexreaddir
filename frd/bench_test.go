@@ -41,10 +41,10 @@ func BenchmarkAppendDir(b *testing.B) {
 				var entries []Entry
 				b.ReportAllocs()
 				for b.Loop() {
-					fd, closeFd := openRaw(b, dir)
+					fd := openRaw(b, dir)
 					var err error
 					entries, err = l.AppendHandle(entries[:0], fd, dir)
-					closeFd()
+					closeRaw(fd)
 					if errors.Is(err, errors.ErrUnsupported) {
 						b.Skip(err)
 					}
