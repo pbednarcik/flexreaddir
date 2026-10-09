@@ -169,23 +169,25 @@ func byLength(names [][]byte) [][]byte {
 
 // BenchmarkAppendUTF16Real decodes every name of a corpus once per iteration,
 // in kernel order, and reports the cost per name and per code unit. Names
-// are packed (see packed), so cap(name) ends at the name, as the decoder
-// may not assume more. The fixed arm is the eleven-unit shape of the
-// synthetic benchmarks and the bylength arms the same names sorted by
-// length, for the question whether a learned loop exit flatters them.
+// are packed with slack (see packedSlack): each cap runs on past the name,
+// as it does inside a kernel buffer, so a kernel step may run on a short
+// name (with cap ending at the name it cannot, measured 2026-10-09). The
+// fixed arm is the eleven-unit shape of the synthetic benchmarks and the
+// bylength arms the same names sorted by length, for the question whether a
+// learned loop exit flatters them.
 func BenchmarkAppendUTF16Real(b *testing.B) {
 	type set struct {
 		label string
 		names [][]byte
 	}
-	sets := []set{{"fixed11", packed(fixedNames(4096))}}
+	sets := []set{{"fixed11", packedSlack(fixedNames(4096))}}
 	for _, d := range realDirs {
 		if _, err := os.Stat(d.path); err != nil {
 			b.Logf("skipping %s: %v", d.name, err)
 			continue
 		}
 		names := realNames(b, captureFullInfo(b, d.path))
-		sets = append(sets, set{d.name, packed(names)}, set{d.name + "-bylength", packed(byLength(names))})
+		sets = append(sets, set{d.name, packedSlack(names)}, set{d.name + "-bylength", packedSlack(byLength(names))})
 	}
 	for _, s := range sets {
 		units := corpus(b, s.label, s.names)
