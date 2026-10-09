@@ -313,6 +313,18 @@ same walk runs at the same speed with the collector on or off, within 2.5%:
 there it is the kernel's time, and `AppendHandle` saves only the `os.File` per
 directory ([the rows](docs/superpowers/evidence/2026-10-08-lister-macos.md)).
 
+### `CompareName` and `SortByName`
+
+```go
+func CompareName(a, b Entry) int
+func SortByName(entries []Entry)
+```
+
+`AppendDir` returns entries in the order the kernel gives them. `SortByName` sorts them
+by name in byte order, the order `os.ReadDir` returns, in place and without allocating.
+`CompareName` is the same order as a comparison, for `slices.SortFunc`,
+`slices.BinarySearchFunc` or a merge.
+
 ### `Entry`
 
 ```go
