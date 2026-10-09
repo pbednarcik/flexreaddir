@@ -325,6 +325,18 @@ by name in byte order, the order `os.ReadDir` returns, in place and without allo
 `CompareName` is the same order as a comparison, for `slices.SortFunc`,
 `slices.BinarySearchFunc` or a merge.
 
+### `ReadDir`
+
+```go
+func ReadDir(name string) ([]Entry, error)
+```
+
+Lists the directory `name` and returns its entries sorted by name, as `os.ReadDir` does:
+the same order, an `*os.PathError` from the open, `ENOTDIR` for a name that is not a
+directory, the entries read before a failure together with the error, and an empty
+non-nil slice for an empty directory. It borrows the pooled buffer, as the function
+`AppendDir` does; a walker keeps a `Lister` instead.
+
 ### `Entry`
 
 ```go
