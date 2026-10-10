@@ -11,7 +11,7 @@ import (
 
 // What AppendHandle adds to opening and closing a raw handle on a 100-file
 // directory, with a Lister that has its buffer: the names, nothing else.
-// Windows only, where the count was measured; Linux stats each file.
+// Windows only, the one platform where the count was measured.
 func TestAppendHandleAllocatesOnlyTheNames(t *testing.T) {
 	dir := t.TempDir()
 	for i := range 100 {

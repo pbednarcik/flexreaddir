@@ -11,17 +11,11 @@ import (
 // A directory that may be read but not searched lists its names and refuses
 // every stat, so the error names the entry and the call that failed.
 func TestAnEntryThatCannotBeStatedIsAPathErrorNamingIt(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root is never refused a stat")
-	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0o400); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	refuseSearch(t, dir)
 	f, err := os.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -48,3 +42,7 @@ func TestTheFstatatFallbackListsWhatStatxLists(t *testing.T) {
 		t.Fatalf("through fstatat %+v, through statx %+v", got, want)
 	}
 }
+
+// idsPersist is true: statx's stx_ino is the kernel's inode number, which
+// lstat reports too.
+func idsPersist(*testing.T, string) bool { return true }

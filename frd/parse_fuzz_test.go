@@ -11,7 +11,7 @@ func FuzzRecords(f *testing.F) {
 	f.Add(records(rec{common: attrName | attrObjtype | attrModtime, file: attrDataLength, name: "old.go", objtype: typeRegular, size: 1},
 		rec{common: every, file: attrDataLength, name: "b.go", objtype: typeRegular, chg: 1, fileID: 2, size: 3}), 2)
 	f.Fuzz(func(t *testing.T, buf []byte, n int) {
-		got, err := parseRecords(nil, buf, n)
+		got, err := parseRecords(nil, buf, n, keepIDs)
 		if err != nil {
 			return
 		}

@@ -32,7 +32,7 @@ func TestParseRecordsAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 	buf := hundredRecords()
 	dst := make([]Entry, 0, 100)
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseRecords(dst[:0], buf, 100); err != nil {
+		if _, err := parseRecords(dst[:0], buf, 100, keepIDs); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -44,7 +44,7 @@ func TestParseRecordsAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 func TestParseRecordsIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 	buf := hundredRecords()
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseRecords(nil, buf, 100); err != nil {
+		if _, err := parseRecords(nil, buf, 100, keepIDs); err != nil {
 			t.Fatal(err)
 		}
 	})

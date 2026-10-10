@@ -18,8 +18,8 @@ import (
 //	root/
 //	  hello.txt      5 bytes
 //	  notes/
-//	    a.md         2 bytes
-//	    b.md         3 bytes
+//	    a.md         3 bytes
+//	    b.md         4 bytes
 //	  empty/
 //
 // It returns the root and a function that removes it.
@@ -170,6 +170,33 @@ func ExampleLister() {
 	}
 	fmt.Println(files, "files")
 	// Output: 3 files
+}
+
+// A walker that opens directories itself lists the raw descriptor, or handle
+// on Windows, without an os.File around it. Here the descriptor comes from an
+// os.File, which must stay reachable until the listing returns.
+func ExampleLister_AppendHandle() {
+	root, cleanup := exampleTree()
+	defer cleanup()
+
+	f, err := os.Open(filepath.Join(root, "notes"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	var l frd.Lister
+	entries, err := l.AppendHandle(nil, f.Fd(), f.Name())
+	if err != nil {
+		log.Fatal(err)
+	}
+	slices.SortFunc(entries, func(a, b frd.Entry) int { return cmp.Compare(a.Name, b.Name) })
+	for _, e := range entries {
+		fmt.Println(e.Name, e.Size)
+	}
+	// Output:
+	// a.md 3
+	// b.md 4
 }
 
 // Entry is comparable, so whether a file changed since an earlier listing is

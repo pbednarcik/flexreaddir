@@ -34,6 +34,7 @@ func byName(t *testing.T, entries []Entry) map[string]Entry {
 		}
 		m[e.Name] = e
 	}
+	dropAppleDouble(m)
 	return m
 }
 
@@ -76,7 +77,7 @@ func TestOneListerServesManyDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := make([]string, 0, len(entries))
-		for _, e := range entries {
+		for _, e := range byName(t, entries) {
 			if e.Size != int64(len(e.Name)) {
 				t.Errorf("directory %d: %s has size %d, want %d", i, e.Name, e.Size, len(e.Name))
 			}
@@ -119,7 +120,9 @@ func TestConcurrentListingsAgree(t *testing.T) {
 				for _, e := range entries {
 					got[e.Name] = e
 				}
-				if len(got) != len(entries) || !maps.Equal(got, want) {
+				twice := len(got) != len(entries)
+				dropAppleDouble(got)
+				if twice || !maps.Equal(got, want) {
 					t.Errorf("goroutine %d listed %v, want %v", g, entries, want)
 					return
 				}

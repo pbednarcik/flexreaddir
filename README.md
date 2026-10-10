@@ -68,7 +68,7 @@ full path for every file, where the other walks take what the directory
 listing already returned.
 
 In parallel, with fastwalk's default worker count for each machine (10 on
-this Mac, 18 in the container, 32 on the Windows machine) given to both:
+this Mac, 18 in the container, 32 on the Windows machine) given to each:
 
 | How | macOS | Linux (Docker) | Windows |
 |---|---:|---:|---:|
@@ -248,7 +248,18 @@ Reads the open directory `dir` from its current offset to its end and appends
 one `Entry` per name to `dst`. Entries come in no particular order; `"."` and
 `".."` are never included; a symbolic link is reported as a link and not
 followed; a name removed between the read and its stat is left out. Any other
-failure is an `*os.PathError`, returned with the entries read before it.
+failure is an `*os.PathError`, returned with the entries read before it and
+naming the entry that failed, or the directory when the listing call itself
+failed.
+
+Two directories behave differently on macOS. One that may be read but not
+searched (`r` without `x`) fails as a whole with a permission error naming the
+directory, even when it is empty, where `os.ReadDir` lists its names; on Linux
+the listing fails at the first name it has to stat. And in `/dev/fd`, which
+holds the caller's own descriptors, `getattrlistbulk` reports every entry as
+`fs.ModeIrregular` and stops with `EBADF` at a descriptor `lstat` cannot
+describe either, such as the Go runtime's kqueue; `os.ReadDir` follows each
+with `lstat` instead.
 
 ```go
 f, err := os.Open(dir)
@@ -309,8 +320,8 @@ Windows handle or Unix descriptor, the value `os.File.Fd` returns, without
 wrapping it in an `os.File`. It reads from the handle's current position and
 never closes it; `name` is used only in errors. A handle taken from
 `os.File.Fd` needs that `os.File` kept reachable until the call returns, since
-its finalizer closes the handle. Where there is no native
-listing it returns an error wrapping `errors.ErrUnsupported`.
+its finalizer closes the handle. On platforms other than macOS, Linux and
+Windows it returns an error wrapping `errors.ErrUnsupported`.
 
 On the Windows machine above, a parallel walk of the kernel source with one
 kept `Lister` per worker and `AppendHandle` allocated 3.7 MiB against 19.6 MiB
@@ -320,10 +331,10 @@ collector off allocates the kept figure on both machines. Whether that costs
 time depends on the platform. On Windows every collection makes the walk's
 threads queue on the Go scheduler's lock as they enter system calls, and more
 than half the wall time went there
-([the rows](docs/superpowers/evidence/2026-10-07-lister.md)). On macOS the
+([the rows](docs/notes/evidence/2026-10-07-lister.md)). On macOS the
 same walk runs at the same speed with the collector on or off, within 2.5%:
 there it is the kernel's time, and `AppendHandle` saves only the `os.File` per
-directory ([the rows](docs/superpowers/evidence/2026-10-08-lister-macos.md)).
+directory ([the rows](docs/notes/evidence/2026-10-08-lister-macos.md)).
 
 ### `CompareName` and `SortByName`
 
@@ -370,15 +381,18 @@ filled on every platform.
 metadata, such as its permissions. It comes from `ATTR_CMN_CHGTIME` on macOS,
 `statx`'s `stx_ctime` on Linux and the listing's own `ChangeTime` on Windows,
 and is zero on the other platforms and on a Windows filesystem that keeps no
-change time. `FileID` comes from `ATTR_CMN_FILEID` on macOS, `stx_ino` on Linux
-and the listing's `FILE_ID_EXTD_DIR_INFO` `FileId` on Windows when it fits 64 bits,
-as on NTFS; that class costs a warm listing 5 to 9% over `FILE_FULL_DIR_INFO`
-(measured, `docs/superpowers/evidence/2026-10-09-fileid-windows.md`), the price of the
-identity. It is zero where the volume gives none: ReFS and Dev Drive (128-bit ids),
-FAT, WSL's 9P and shares on servers older than Windows Server 2025. Zero means
-unknown, never equal. With
-both present, a walker can tell a file replaced by another from one rewritten
-in place.
+change time. On macOS a filesystem that keeps none, FAT32 for one, gives the
+modification time instead, as `lstat` does. `FileID` comes from
+`ATTR_CMN_FILEID` on macOS, `stx_ino` on Linux and the listing's
+`FILE_ID_EXTD_DIR_INFO` `FileId` on Windows when it fits 64 bits, as on NTFS;
+that class costs a warm listing 5 to 9% over `FILE_FULL_DIR_INFO` (measured,
+`docs/superpowers/evidence/2026-10-09-fileid-windows.md`), the price of the
+identity. It is zero where the volume gives none: on Windows ReFS and Dev Drive
+(128-bit ids), FAT, WSL's 9P and shares on servers older than Windows Server
+2025; on macOS a volume that says its ids do not persist, such as FAT32, exFAT
+and NFS, where an empty FAT file gets a new id on every listing. Zero means
+unknown, never equal. With `ChangeTimeNanos` and `FileID` both present, a
+walker can tell a file replaced by another from one rewritten in place.
 
 The names from one read share one allocation, so a `Name` kept long after its
 neighbours are gone is worth a `strings.Clone`. `Entry` is comparable, so
@@ -402,7 +416,7 @@ func (e Entry) ModTime() time.Time
 ```
 
 The modification time as a `time.Time`, for display or date arithmetic. It is
-the zero Unix time for anything but a regular file.
+the Unix epoch for anything but a regular file.
 
 ```go
 for _, e := range entries {
@@ -432,8 +446,8 @@ if errors.Is(err, frd.ErrMalformed) {
 ## How the macOS path works without cgo
 
 The package calls libSystem the way `golang.org/x/sys/unix` does: a
-`//go:cgo_import_dynamic` directive, a one-instruction assembly trampoline,
-and the runtime's `syscall.syscall6`, which Go keeps reachable by linkname
+`//go:cgo_import_dynamic` directive, a one-instruction assembly trampoline
+for each libSystem function, and the runtime's `syscall.syscall6`, which Go keeps reachable by linkname
 for exactly this kind of package. If a future Go release closed that
 door, the package would stop building on macOS rather than misbehave, and
 `golang.org/x/sys` would be in the same position.
@@ -450,15 +464,18 @@ trampoline: `GetFileInformationByHandleEx` comes from `golang.org/x/sys/windows`
 ## Status
 
 v0: the seven names are meant to stay, but the module is young and the API is
-not frozen until v1. Every platform path is tested and fuzzed in CI on Linux,
-macOS and Windows, on the current and previous Go release.
+not frozen until v1. CI runs the tests on Linux (amd64 and arm64), macOS
+(arm64) and Windows, on Go 1.27, the oldest release it supports, and on the
+current release, again with the name decoder's assembly turned off; and it
+fuzzes the three record parsers and the name decoder on each of the three
+with the current release. The fallback for other systems is vetted, not run.
 
-Design notes, plans and the measurements behind every number in this file are
-under [`docs/superpowers`](docs/superpowers), one dated file per question.
+The measurements behind every number in this file, and the questions they
+settled, are under [`docs/notes`](docs/notes), one dated file per question.
 
 ## Requirements
 
-Go 1.26 or later.
+Go 1.27 or later.
 
 ## License
 

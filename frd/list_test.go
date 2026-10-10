@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,7 +29,21 @@ func readDir(t *testing.T, dir string) map[string]Entry {
 		}
 		byName[e.Name] = e
 	}
+	dropAppleDouble(byName)
 	return byName
+}
+
+// dropAppleDouble removes the ._name companion macOS writes beside each file
+// it gives an extended attribute on FAT and exFAT, which keep none, so the
+// tests also pass with their directories on such a volume.
+func dropAppleDouble(byName map[string]Entry) {
+	for name := range byName {
+		if rest, ok := strings.CutPrefix(name, "._"); ok {
+			if _, companion := byName[rest]; companion {
+				delete(byName, name)
+			}
+		}
+	}
 }
 
 func TestAppendDirAgreesWithLstat(t *testing.T) {
@@ -139,13 +154,18 @@ func TestNamesOutsideASCIIAgreeWithReadDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := readDir(t, dir)
-	if len(got) != len(des) {
-		t.Fatalf("listed %d entries, os.ReadDir %d", len(got), len(des))
-	}
+	names := map[string]Entry{}
 	for _, de := range des {
-		if _, ok := got[de.Name()]; !ok {
-			t.Errorf("os.ReadDir lists %q, AppendDir does not: %v", de.Name(), got)
+		names[de.Name()] = Entry{}
+	}
+	dropAppleDouble(names)
+	got := readDir(t, dir)
+	if len(got) != len(names) {
+		t.Fatalf("listed %d entries, os.ReadDir %d", len(got), len(names))
+	}
+	for name := range names {
+		if _, ok := got[name]; !ok {
+			t.Errorf("os.ReadDir lists %q, AppendDir does not: %v", name, got)
 		}
 	}
 }

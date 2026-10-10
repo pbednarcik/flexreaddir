@@ -64,7 +64,7 @@ func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 
 // pathError names the directory in err. listOp names the platform's listing
 // call; readAll returns an *os.PathError of its own for an entry that failed,
-// which is named within the directory.
+// whose path, relative to the directory, is joined to name.
 func pathError(err error, name string) error {
 	if err == nil {
 		return nil
