@@ -225,7 +225,7 @@ Why each platform is faster:
   from six units up (a five-unit name costs the same either way, a four-unit one 0.6 ns
   more), decodes WinSxS's long names four to five times faster than the Go loop, and
   takes 17 to 20% off a warm listing of that directory, 6 to 7% off System32's
-  (`docs/superpowers/evidence/2026-10-09-simd-decoder.md` and `2026-10-09-decoder-sweep.md`).
+  (`docs/notes/evidence/2026-10-09-simd-decoder.md` and `2026-10-09-decoder-sweep.md`).
 - **macOS, Linux and Windows**: all the names from one kernel read share a
   single allocation and the result grows once per read, so a listing allocates
   a handful of times whatever its size.
@@ -386,7 +386,7 @@ modification time instead, as `lstat` does. `FileID` comes from
 `ATTR_CMN_FILEID` on macOS, `stx_ino` on Linux and the listing's
 `FILE_ID_EXTD_DIR_INFO` `FileId` on Windows when it fits 64 bits, as on NTFS;
 that class costs a warm listing 5 to 9% over `FILE_FULL_DIR_INFO` (measured,
-`docs/superpowers/evidence/2026-10-09-fileid-windows.md`), the price of the
+`docs/notes/evidence/2026-10-09-fileid-windows.md`), the price of the
 identity. It is zero where the volume gives none: on Windows ReFS and Dev Drive
 (128-bit ids), FAT, WSL's 9P and shares on servers older than Windows Server
 2025; on macOS a volume that says its ids do not persist, such as FAT32, exFAT

@@ -72,8 +72,8 @@ func withClass(t *testing.T, class uint32) {
 	t.Cleanup(func() { listClass = windows.FileIdExtdDirectoryInfo })
 }
 
-// The default class is FILE_ID_EXTD_DIR_INFO (Peter's ruling of 2026-10-09:
-// the identity is worth the measured 5 to 9% of a warm listing). The same
+// The default class is FILE_ID_EXTD_DIR_INFO (the owner's ruling: the
+// identity is worth the measured 5 to 9% of a warm listing). The same
 // directory listed with FILE_FULL_DIR_INFO carries no FileID and agrees in
 // every other field.
 func TestTheFullClassListsTheSameWithoutFileIDs(t *testing.T) {
