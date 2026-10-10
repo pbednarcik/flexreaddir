@@ -44,3 +44,19 @@ func TestSortByNameAllocatesNothing(t *testing.T) {
 		t.Fatalf("%v allocations per sort", n)
 	}
 }
+
+// Ninety entries, so the sort leaves insertion sort behind: slices.SortFunc
+// reorders equal names here, slices.SortStableFunc does not.
+func TestSortByNameIsStable(t *testing.T) {
+	names := []string{"c", "a", "b"}
+	es := make([]Entry, 90)
+	for i := range es {
+		es[i] = Entry{Name: names[i%3], Size: int64(i)}
+	}
+	SortByName(es)
+	for i := 1; i < len(es); i++ {
+		if es[i-1].Name == es[i].Name && es[i-1].Size > es[i].Size {
+			t.Fatalf("entry %d (size %d) sorted after size %d with the same name", i, es[i].Size, es[i-1].Size)
+		}
+	}
+}

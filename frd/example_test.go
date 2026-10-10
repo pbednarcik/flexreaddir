@@ -1,13 +1,11 @@
 package frd_test
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"github.com/pbednarcik/flexreaddir/frd"
@@ -53,7 +51,7 @@ func list(dir string, entries []frd.Entry) []frd.Entry {
 	if err != nil {
 		log.Fatal(err)
 	}
-	slices.SortFunc(entries, func(a, b frd.Entry) int { return cmp.Compare(a.Name, b.Name) })
+	frd.SortByName(entries)
 	return entries
 }
 
@@ -70,7 +68,7 @@ func ExampleAppendDir() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	slices.SortFunc(entries, func(a, b frd.Entry) int { return cmp.Compare(a.Name, b.Name) })
+	frd.SortByName(entries)
 	for _, e := range entries {
 		switch {
 		case e.Type.IsDir():
@@ -190,7 +188,7 @@ func ExampleLister_AppendHandle() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	slices.SortFunc(entries, func(a, b frd.Entry) int { return cmp.Compare(a.Name, b.Name) })
+	frd.SortByName(entries)
 	for _, e := range entries {
 		fmt.Println(e.Name, e.Size)
 	}
