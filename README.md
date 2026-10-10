@@ -441,9 +441,10 @@ door, the package would stop building on macOS rather than misbehave, and
 The buffers the kernel fills, macOS attribute records, Linux `getdents64`
 records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
 bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
-hold what it claims is `ErrMalformed`, never a panic. The one piece of assembly decodes
-Windows names on amd64, inside a name the Go walk has already bounded; it is fuzzed against
-the Go decoder, which `-tags purego` selects. Windows needs no
+hold what it claims is `ErrMalformed`, never a panic. The assembly is two small pieces: the
+macOS trampoline above, and the amd64 name kernels, which read at most 62 bytes past a name,
+always inside the buffer the Go walk has bounded, and are fuzzed against the Go decoder, which
+`-tags purego` selects. Windows needs no
 trampoline: `GetFileInformationByHandleEx` comes from `golang.org/x/sys/windows`.
 
 ## Status

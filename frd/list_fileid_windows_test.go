@@ -149,7 +149,7 @@ func TestEveryFileOfABigDirectoryCarriesItsID(t *testing.T) {
 	if !onNTFS(t, dir) {
 		t.Skip("the temporary directory is not on NTFS")
 	}
-	const files = 1500 // 1,500 records of 88 bytes and a 90-byte name exceed 64 KiB
+	const files = 1500 // 1,500 records of 88 bytes and an 86-byte name exceed 64 KiB
 	for i := range files {
 		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("a-name-long-enough-to-fill-the-buffer-%05d", i)), nil, 0o644); err != nil {
 			t.Fatal(err)

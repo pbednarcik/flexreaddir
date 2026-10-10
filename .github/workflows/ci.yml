@@ -26,6 +26,7 @@ jobs:
       - name: test the Go decoder tier
         run: go test -tags purego -count=1 ./frd
       - name: test without AVX2
+        if: runner.arch == 'X64'
         run: go test -count=1 ./frd
         env:
           GODEBUG: cpu.avx2=off
