@@ -83,6 +83,60 @@ func TestEveryTierIgnoresWhatFollowsAName(t *testing.T) {
 	})
 }
 
+// Every tier against the scalar reference on every name shape the kernel can
+// tell apart: each length from 0 to 255 units (a Windows name's limit), all
+// ASCII, or with one unit at each of the pack's saturation boundaries at each
+// position. Each name ends at its readable bound, at the slacks either side of
+// a step's 32- and 64-byte reads, and the page after that bound faults where
+// the platform allows (guardedPage): a step that reads past readable crashes.
+// Fuzzing cannot stand in for this; coverage guidance does not see assembly,
+// and random units are almost never a run of ASCII long enough to step.
+func TestEveryTierAgreesOnEveryNameShape(t *testing.T) {
+	mem := guardedPage(t)
+	for i := range mem {
+		mem[i] = 0xFF // past the name: a unit no step may pass
+	}
+	bad := []uint16{0, 0x80, 0xFF, 0x100, 0x7FFF, 0x8000, 0xD800, 0xDFFF, 0xFFFF}
+	var got, want []byte
+	forEachTier(t, func(tier string) {
+		decodes := 0
+		for _, slack := range []int{0, 1, 2, 31, 32, 33, 63, 64, 65} {
+			for units := 0; units <= 255; units++ {
+				end := len(mem) - slack
+				src := mem[end-2*units : end : len(mem)]
+				for i := range units { // every unit from 1 to 0x7F, 37 being prime to 127
+					binary.LittleEndian.PutUint16(src[2*i:], uint16(1+i*37%0x7F))
+				}
+				decode := func(at int, b uint16) {
+					var gotOK, wantOK bool
+					want, wantOK = appendUTF16Scalar(want[:0], src)
+					got, gotOK = appendUTF16(got[:0], src)
+					if gotOK != wantOK || wantOK && !bytes.Equal(got, want) {
+						t.Fatalf("%s, %d units, slack %d, %#x at %d: packed %q %v, scalar %q %v", tier, units, slack, b, at, got, gotOK, want, wantOK)
+					}
+					if gotOK && at >= 0 && b == 0 {
+						t.Fatalf("%s, %d units, slack %d: a NUL unit at %d accepted", tier, units, slack, at)
+					}
+					decodes++
+				}
+				decode(-1, 0)
+				for at := range units {
+					keep := binary.LittleEndian.Uint16(src[2*at:])
+					for _, b := range bad {
+						binary.LittleEndian.PutUint16(src[2*at:], b)
+						decode(at, b)
+					}
+					binary.LittleEndian.PutUint16(src[2*at:], keep)
+				}
+				for i := range src {
+					src[i] = 0xFF
+				}
+			}
+		}
+		t.Logf("%s: %d decodes agree", tier, decodes)
+	})
+}
+
 func FuzzAppendUTF16(f *testing.F) {
 	f.Add(utf16le(utf16.Encode([]rune("a plain ascii name.go"))))
 	f.Add(utf16le(utf16.Encode([]rune(strings.Repeat("abcdefgh", 5)))))

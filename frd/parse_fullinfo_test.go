@@ -3,8 +3,10 @@ package frd
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 	"testing"
 	"unicode/utf16"
 )
@@ -213,6 +215,37 @@ func TestFullInfoNamesAreDecodedFromUTF16(t *testing.T) {
 			}
 			if got[0].Name != c.want {
 				t.Errorf("%s: %v decoded as %q, want %q", lc.name, c.units, got[0].Name, c.want)
+			}
+		}
+	}
+}
+
+// TestFullInfoNamesStayWholeWhenTheirBlockGrows parses one buffer of ASCII
+// names followed by names of three UTF-8 bytes a unit, which outgrow the space
+// reserved for the buffer's names, and checks every name after the whole
+// buffer is parsed: a name handed out must survive the names decoded after it.
+func TestFullInfoNamesStayWholeWhenTheirBlockGrows(t *testing.T) {
+	var rs []finfo
+	var want []string
+	for i := range 40 {
+		n := fmt.Sprintf("ascii-%02d-%s.txt", i, strings.Repeat("x", i))
+		rs, want = append(rs, finfo{name: n}), append(want, n)
+	}
+	for i := range 40 {
+		n := fmt.Sprintf("中文-%02d-%s", i, strings.Repeat("字", 20+i))
+		rs, want = append(rs, finfo{name: n}), append(want, n)
+	}
+	for _, lc := range layouts {
+		got, err := parseFullInfo(nil, finfosIn(lc.l, rs...), lc.l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d entries, want %d", lc.name, len(got), len(want))
+		}
+		for i, e := range got {
+			if e.Name != want[i] {
+				t.Errorf("%s: entry %d is %q, want %q", lc.name, i, e.Name, want[i])
 			}
 		}
 	}

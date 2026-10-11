@@ -118,3 +118,17 @@ func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) 
 		t.Fatalf("parsing 100 records into nil allocated %v times, want 2", allocs)
 	}
 }
+
+// readAll parses the buffer of every empty directory, which holds only "."
+// and "..": no names, so nothing to allocate.
+func TestParseFullInfoOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
+	buf := finfos(finfo{name: "."}, finfo{name: ".."})
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseFullInfo(nil, buf, idExtdDirInfo); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("parsing an empty directory allocated %v times, want 0", allocs)
+	}
+}

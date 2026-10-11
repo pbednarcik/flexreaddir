@@ -40,6 +40,13 @@ const windowsEpoch = 116444736000000000
 // parseFullInfo appends an Entry for each record of layout l chained in buf,
 // with one allocation for their names and at most one to grow dst. On a
 // malformed record it returns the entries before it with the error.
+//
+// Each name is decoded straight into one block and its string sliced from
+// there, with no copy (measured, docs/notes/evidence/2026-10-11-decoder-hypotheses.md).
+// A name's bytes are never written again once it is handed out: later names
+// are appended past it, asciiRun's overreach lands only past the block's
+// length, and a block that must grow is copied, leaving earlier names on the
+// old array.
 func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 	units, entries := 0, 0
 	_ = eachFullInfo(buf, l, func(r fullInfo) error {
@@ -48,15 +55,21 @@ func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 		return nil
 	})
 	dst = slices.Grow(dst, entries)
-	var names nameBlock
-	names.grow(units)            // exact for ASCII names; a name that needs more UTF-8 grows the block once more
-	var scratch [3*255 + 32]byte // a Windows name is at most 255 units of at most 3 bytes each, and asciiRun may write 32 past them
+	// Exact for ASCII names, plus the 32 bytes asciiRun may write past the
+	// last one; names that need more UTF-8 grow the block as append does.
+	// No names, as in every empty directory: nothing to allocate.
+	var block []byte
+	if units > 0 {
+		block = make([]byte, 0, units+32)
+	}
 	err := eachFullInfo(buf, l, func(r fullInfo) error {
-		name, ok := appendUTF16(scratch[:0], r.name)
-		if !ok {
+		start := len(block)
+		var ok bool
+		if block, ok = appendUTF16(block, r.name); !ok {
 			return ErrMalformed // a NUL unit; no Windows name holds one
 		}
-		e := Entry{Name: names.add(name), Type: attrMode(r.attrs, r.tag)}
+		name := unsafe.String(unsafe.SliceData(block[start:]), len(block)-start)
+		e := Entry{Name: name, Type: attrMode(r.attrs, r.tag)}
 		if e.Type.IsRegular() {
 			e.Size, e.ModTimeNanos, e.FileID = r.size, (r.writeTime-windowsEpoch)*100, r.fileID
 			if r.changeTime != 0 { // zero: a filesystem that keeps no change time
