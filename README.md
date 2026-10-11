@@ -123,8 +123,11 @@ Memory for the sequential walk: `ReadDir` + `Info` 1.67 M allocations and
 counts include the walk's own path joins and directory opens. On this tree
 each directory costs the walk about 33 µs on one core, and most of that is
 opening the directory handle, which the walker does before FlexReadDir is
-called. A walker that opened each child relative to its parent's handle would
-gain more here than any listing library can.
+called. A walker that opens each child with `NtCreateFile` relative to its
+parent's handle, and builds no paths, walks this tree 16% faster on one core
+and 9.5% faster in parallel, and the kernel source 17% faster on one core
+([the rows](docs/notes/evidence/2026-10-11-relative-open-and-workers-windows.md));
+on macOS and Linux the same walker saved 0 to 2%.
 
 ### Listing one directory
 
@@ -331,10 +334,16 @@ collector off allocates the kept figure on both machines. Whether that costs
 time depends on the platform. On Windows every collection makes the walk's
 threads queue on the Go scheduler's lock as they enter system calls, and more
 than half the wall time went there
-([the rows](docs/notes/evidence/2026-10-07-lister.md)). On macOS the
-same walk runs at the same speed with the collector on or off, within 2.5%:
-there it is the kernel's time, and `AppendHandle` saves only the `os.File` per
-directory ([the rows](docs/notes/evidence/2026-10-08-lister-macos.md)).
+([the rows](docs/notes/evidence/2026-10-07-lister.md)). A parallel walker on
+Windows should raise its collector target: with `GOGC=400` the same walk ran
+43% faster with kept Listers and 49% with the function `AppendDir`, nearly all
+of what switching the collector off gives
+([the rows](docs/notes/evidence/2026-10-10-buffer-and-gc-windows.md)); a
+long-lived walker can set it around the walk with `debug.SetGCPercent`. On
+macOS the same walk runs at the same speed with the collector on or off,
+within 2.5%: there it is the kernel's time, and `AppendHandle` saves only the
+`os.File` per directory
+([the rows](docs/notes/evidence/2026-10-08-lister-macos.md)).
 
 ### `CompareName` and `SortByName`
 
