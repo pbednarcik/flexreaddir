@@ -10,6 +10,12 @@
 List a directory with the size and modification time of every regular file,
 in one pass, as fast as each platform allows. No cgo on any platform.
 
+Highly optimized, and profiled down to the kernel: each platform's bulk
+listing call, no per-file system call where the platform needs none, names
+decoded with AVX2 or SSE2 on Windows, and a handful of allocations per
+listing whatever its size. FlexReadDir's own code is a few percent of a
+listing; the rest is the operating system's time ([Speed](#speed)).
+
 ```sh
 go get github.com/pbednarcik/flexreaddir/frd
 ```
