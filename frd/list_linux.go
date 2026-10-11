@@ -58,7 +58,8 @@ const statxMask = unix.STATX_TYPE | unix.STATX_SIZE | unix.STATX_MTIME | unix.ST
 // automount point on a filesystem that reports DT_UNKNOWN could be reached.
 const statxFlags = unix.AT_SYMLINK_NOFOLLOW | unix.AT_NO_AUTOMOUNT
 
-// noStatx is set once a kernel older than 4.11 has answered ENOSYS.
+// noStatx is set once statx is known to be unavailable: a kernel older than
+// 4.11 has answered ENOSYS, or a seccomp filter has refused it with EPERM.
 var noStatx atomic.Bool
 
 // statx stats name relative to fd, passing it to the kernel where it lies in
@@ -76,10 +77,25 @@ func statx(fd int, name []byte, stx *unix.Statx_t) error {
 			continue
 		case syscall.ENOSYS:
 			noStatx.Store(true)
+		case syscall.EPERM:
+			// A seccomp filter refusing statx answers EPERM (Docker's default
+			// profile did before 18.04), and so may a filesystem refusing
+			// this one name. fstatat decides: if it can stat the name, statx
+			// is what was refused, and fstatat serves from here on.
+			if err := fstatat(fd, name, stx); err != nil {
+				return err
+			}
+			noStatx.Store(true)
+			return nil
 		default:
 			return errno
 		}
 	}
+	return fstatat(fd, name, stx)
+}
+
+// fstatat is statx's fallback, filling the fields statx would.
+func fstatat(fd int, name []byte, stx *unix.Statx_t) error {
 	var st unix.Stat_t
 	for {
 		err := unix.Fstatat(fd, string(name), &st, unix.AT_SYMLINK_NOFOLLOW)
