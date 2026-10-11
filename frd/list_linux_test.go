@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // A directory that may be read but not searched lists its names and refuses
@@ -40,6 +42,17 @@ func TestTheFstatatFallbackListsWhatStatxLists(t *testing.T) {
 	t.Cleanup(func() { noStatx.Store(false) })
 	if got := readDir(t, dir)["a.go"]; got != want {
 		t.Fatalf("through fstatat %+v, through statx %+v", got, want)
+	}
+}
+
+// statx mounts an automount point it is asked about unless told not to;
+// fstatat, the fallback, never does, since the kernel adds AT_NO_AUTOMOUNT to
+// it, and neither does os.Lstat. Listing a directory must not mount what is
+// in it. The flag is pinned here because no test machine has autofs to show
+// the mount.
+func TestStatxNeverTriggersAnAutomount(t *testing.T) {
+	if statxFlags&unix.AT_NO_AUTOMOUNT == 0 {
+		t.Fatalf("statx flags %#x lack AT_NO_AUTOMOUNT, which fstatat always has", statxFlags)
 	}
 }
 

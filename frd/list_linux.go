@@ -51,6 +51,13 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 
 const statxMask = unix.STATX_TYPE | unix.STATX_SIZE | unix.STATX_MTIME | unix.STATX_CTIME | unix.STATX_INO
 
+// statxFlags: the name itself, never a symlink's target; and never mount an
+// automount point to describe it, as fstatat and os.Lstat never do (the
+// kernel adds AT_NO_AUTOMOUNT to them; statx(2) asks directory scanners to
+// pass it). Only regular files and DT_UNKNOWN entries are statted, so only an
+// automount point on a filesystem that reports DT_UNKNOWN could be reached.
+const statxFlags = unix.AT_SYMLINK_NOFOLLOW | unix.AT_NO_AUTOMOUNT
+
 // noStatx is set once a kernel older than 4.11 has answered ENOSYS.
 var noStatx atomic.Bool
 
@@ -59,7 +66,7 @@ var noStatx atomic.Bool
 func statx(fd int, name []byte, stx *unix.Statx_t) error {
 	for !noStatx.Load() {
 		_, _, errno := unix.Syscall6(unix.SYS_STATX, uintptr(fd), uintptr(unsafe.Pointer(&name[0])),
-			unix.AT_SYMLINK_NOFOLLOW, statxMask, uintptr(unsafe.Pointer(stx)), 0)
+			statxFlags, statxMask, uintptr(unsafe.Pointer(stx)), 0)
 		runtime.KeepAlive(name)
 		runtime.KeepAlive(stx)
 		switch errno {
