@@ -1,6 +1,7 @@
 package frd
 
 import (
+	"errors"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -9,10 +10,8 @@ import (
 const listOp = "GetFileInformationByHandleEx"
 
 // listClass is the information class a listing asks for. FILE_ID_EXTD_DIR_INFO
-// is the default: it fills Entry.FileID, and its 20 more bytes per record cost
-// a warm NTFS listing 1.7 to 3.2% (measured 2026-10-11), a price the owner
-// accepted for the identity. FILE_FULL_DIR_INFO is the fallback, and the
-// tests' comparison.
+// is the default: it fills Entry.FileID at the cost of 20 more bytes per
+// record. FILE_FULL_DIR_INFO is the fallback, and the tests' comparison.
 var listClass uint32 = windows.FileIdExtdDirectoryInfo
 
 // refuseFileIDWith, when not 0, makes the first listing call fail with that
@@ -28,13 +27,12 @@ func layoutOf(class uint32) layout {
 }
 
 // readAll fills buf from the handle's current position until the kernel has
-// no more, asking for listClass. With FILE_ID_EXTD_DIR_INFO, a volume that
-// refuses the class on the first call (FAT32, WSL's 9P, SMB servers older than
-// Windows Server 2025), with whatever error, is listed with FILE_FULL_DIR_INFO
-// instead, and its entries carry no FileID. The class never changes once a
-// call has succeeded, since the handle's position has moved.
-// ERROR_FILE_NOT_FOUND on the first call is an empty root directory
-// (MS-FSA 2.1.5.6.3), not a failure. The buffer must be 8-byte aligned.
+// no more, asking for listClass. A volume that refuses FILE_ID_EXTD_DIR_INFO
+// on the first call (FAT32, WSL's 9P and older SMB servers do) is listed with
+// FILE_FULL_DIR_INFO, and its entries carry no FileID. Only the first call
+// may switch: after it, the handle's position has moved. ERROR_FILE_NOT_FOUND
+// on the first call is an empty root directory (MS-FSA 2.1.5.6.3), not a
+// failure. buf must be 8-byte aligned.
 func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	class, l := listClass, layoutOf(listClass)
 	for first := true; ; first = false {
@@ -48,7 +46,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 			class, l = windows.FileFullDirectoryInfo, fullDirInfo
 			err = windows.GetFileInformationByHandleEx(windows.Handle(h), class, &buf[0], uint32(len(buf)))
 		}
-		if err == syscall.ERROR_NO_MORE_FILES || first && err == syscall.ERROR_FILE_NOT_FOUND {
+		if errors.Is(err, syscall.ERROR_NO_MORE_FILES) || first && errors.Is(err, syscall.ERROR_FILE_NOT_FOUND) {
 			return dst, nil
 		}
 		if err != nil {
@@ -66,5 +64,5 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 // the end of the listing and an empty root is retried with the old class,
 // which fails the same way when the error was real, at the cost of one call.
 func refused(err error) bool {
-	return err != nil && err != syscall.ERROR_NO_MORE_FILES && err != syscall.ERROR_FILE_NOT_FOUND
+	return err != nil && !errors.Is(err, syscall.ERROR_NO_MORE_FILES) && !errors.Is(err, syscall.ERROR_FILE_NOT_FOUND)
 }

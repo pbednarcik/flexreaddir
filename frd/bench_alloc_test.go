@@ -119,8 +119,8 @@ func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) 
 	}
 }
 
-// readAll parses the buffer of every empty directory, which holds only "."
-// and "..": no names, so nothing to allocate.
+// An empty directory other than a volume root lists only "." and "..": no
+// names, so nothing to allocate.
 func TestParseFullInfoOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
 	buf := finfos(finfo{name: "."}, finfo{name: ".."})
 	allocs := testing.AllocsPerRun(20, func() {

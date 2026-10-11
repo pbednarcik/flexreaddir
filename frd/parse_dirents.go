@@ -86,7 +86,7 @@ func eachDirent(buf []byte, visit func(name []byte, dtype byte) error) error {
 }
 
 // direntMode reports false for DT_UNKNOWN, which some filesystems return for
-// every entry and which only a stat can resolve.
+// every entry, and for any type it does not name; only a stat resolves those.
 func direntMode(dtype byte) (fs.FileMode, bool) {
 	switch dtype {
 	case dtRegular:

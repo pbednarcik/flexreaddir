@@ -9,7 +9,8 @@ import (
 )
 
 // dirent packs one linux_dirent64 record: inode, offset, record length,
-// type, then the NUL-terminated name padded to eight bytes.
+// type, then the NUL-terminated name, the record padded to a multiple of
+// eight bytes.
 func dirent(name string, dtype byte) []byte {
 	ne := binary.NativeEndian
 	b := ne.AppendUint64(nil, 1)
@@ -51,8 +52,8 @@ func TestEveryDirentButTheDotsIsVisited(t *testing.T) {
 	}
 }
 
-// The Linux arm hands a name to statx in place, so the byte after it in the
-// buffer must be its NUL.
+// On Linux the listing hands a name to statx in place, so the byte after it
+// in the buffer must be its NUL.
 func TestEveryVisitedNameIsFollowedByItsNUL(t *testing.T) {
 	buf := slices.Concat(dirent("a.go", dtRegular), dirent("longer-name.go", dtRegular))
 	err := eachDirent(buf, func(name []byte, _ byte) error {

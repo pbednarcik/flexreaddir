@@ -3,6 +3,7 @@
 package frd
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 	"syscall"
@@ -33,7 +34,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	persistent := func(fsid uint64) bool { return persistentIDs(fd, fsid) }
 	for {
 		n, err := getattrlistbulk(fd, &requested, buf)
-		if err == syscall.EINTR {
+		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil || n == 0 {
@@ -68,13 +69,19 @@ func persistentIDs(fd int, fsid uint64) bool {
 }
 
 // keepsIDs asks the kernel whether the volume holding fd keeps its file ids.
-// A volume that cannot be asked keeps them, and known is false.
+// A volume that cannot be asked is taken not to, and known is false, so the
+// next listing asks again.
 func keepsIDs(fd int) (keep, known bool) {
 	var caps volCapabilities
-	if fgetattrlist(fd, &volumeCapabilities, unsafe.Pointer(&caps), unsafe.Sizeof(caps)) != nil {
-		return true, false
+	for {
+		err := fgetattrlist(fd, &volumeCapabilities, unsafe.Pointer(&caps), unsafe.Sizeof(caps))
+		if err == nil {
+			return persists(caps), true
+		}
+		if !errors.Is(err, syscall.EINTR) {
+			return false, false
+		}
 	}
-	return persists(caps), true
 }
 
 // persists reads VOL_CAP_FMT_PERSISTENTOBJECTIDS; a volume whose answer is

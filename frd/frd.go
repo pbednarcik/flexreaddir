@@ -27,32 +27,31 @@ type Entry struct {
 	Size int64
 
 	// ModTimeNanos is a regular file's modification time in nanoseconds
-	// since the Unix epoch. An integer keeps Entry comparable with == and
-	// a change check to one comparison; [Entry.ModTime] converts it. As with
-	// [time.Time.UnixNano], a time before the year 1678 or after 2262 does
-	// not fit and the value is undefined.
+	// since the Unix epoch. As an integer it keeps Entry comparable with ==,
+	// so a change check is one comparison; [Entry.ModTime] converts it. As
+	// with [time.Time.UnixNano], a time before the year 1678 or after 2262
+	// does not fit and the value is undefined.
 	ModTimeNanos int64
 
 	// ChangeTimeNanos is a regular file's status change time in nanoseconds
-	// since the Unix epoch, which every write and every change to the file's
-	// metadata moves: st_ctime as ATTR_CMN_CHGTIME on macOS and statx's
-	// stx_ctime on Linux, which no Unix call sets; the listing's own
-	// ChangeTime on Windows, which SetFileInformationByHandle can set. It is
-	// zero on a Windows filesystem that keeps no change time and on the other
-	// platforms, where the portable path does not read it. On macOS a
+	// since the Unix epoch, moved by every write and every metadata change:
+	// ATTR_CMN_CHGTIME on macOS, stx_ctime on Linux, the listing's ChangeTime
+	// on Windows. No Unix call can set it; on Windows
+	// SetFileInformationByHandle can. It is zero on a Windows filesystem that
+	// keeps none and on platforms without a native listing. On macOS a
 	// filesystem that keeps none, such as FAT32, gives the modification time,
 	// as lstat does.
 	ChangeTimeNanos int64
 
 	// FileID is a regular file's number on its volume: ATTR_CMN_FILEID on
-	// macOS, statx's stx_ino on Linux, and on Windows the listing's
-	// FILE_ID_EXTD_DIR_INFO FileId when it fits 64 bits, as on NTFS. It is
-	// zero where the platform or the volume gives none: on Windows ReFS and
-	// Dev Drive (128-bit ids), FAT, WSL's 9P and shares on servers older than
-	// Windows Server 2025; on macOS a volume that clears
-	// VOL_CAP_FMT_PERSISTENTOBJECTIDS, such as FAT32, exFAT and NFS, where an
-	// empty FAT file gets a new id on every listing; and the platforms without
-	// a native listing. Zero means unknown, never equal.
+	// macOS, stx_ino on Linux, and on Windows the listing's FileId when it
+	// fits 64 bits, as on NTFS. Zero means unknown, never equal. It is zero:
+	//   - on Windows, for a 128-bit id (ReFS, Dev Drive) and on volumes that
+	//     give none: FAT, WSL's 9P, shares on servers older than Windows
+	//     Server 2025;
+	//   - on macOS, on a volume whose ids do not persist, such as FAT32,
+	//     exFAT and NFS, or that cannot be asked;
+	//   - on platforms without a native listing.
 	FileID uint64
 }
 
@@ -69,6 +68,10 @@ var ErrMalformed = errors.New("frd: malformed directory buffer")
 // and appends an Entry for each name in it to dst, returning the extended
 // slice. Passing a slice from an earlier call, truncated to zero length,
 // reuses its storage.
+//
+// On macOS, Linux and Windows, do not mix AppendDir with dir's ReadDir,
+// Readdir or Readdirnames: those buffer entries the native listing cannot
+// see. Reopen the directory to switch.
 //
 // Entries come in no particular order, and "." and ".." are never included.
 // A symbolic link is reported as a link and not followed. A name removed
@@ -89,9 +92,10 @@ var ErrMalformed = errors.New("frd: malformed directory buffer")
 //
 // AppendDir is safe to call from many goroutines at once, each with its own
 // dir; two calls on one dir share its offset and split its entries between
-// them. It borrows the buffer the kernel fills from a [sync.Pool], which may
-// drop its buffers at any garbage collection. A walker that lists many
-// directories keeps a [Lister] instead, one per goroutine.
+// them. On macOS, Linux and Windows it borrows the buffer the kernel fills
+// from a [sync.Pool], which may drop its buffers at any garbage collection.
+// A walker that lists many directories keeps a [Lister] instead, one per
+// goroutine.
 func AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDir(dst, dir)
 }
@@ -107,7 +111,8 @@ func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 // AppendHandle is AppendDir for a directory the caller holds as a raw
 // handle on Windows or a file descriptor elsewhere, the value [os.File.Fd]
 // returns, so a walker that opens directories itself need not wrap each in
-// an [os.File]. The listing starts at the handle's current position. name is
+// an [os.File]. The listing starts at the handle's current position, so the
+// caution under AppendDir applies to a handle taken from an os.File. name is
 // used only in errors, as [os.NewFile] uses it.
 //
 // AppendHandle does not close the handle or change its mode, and the caller

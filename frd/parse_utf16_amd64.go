@@ -4,7 +4,7 @@ package frd
 
 import "golang.org/x/sys/cpu"
 
-// The kernels asciiRun may use. Every amd64 has SSE2; AVX2 is checked once.
+// The SIMD tiers asciiRun may use. Every amd64 has SSE2; AVX2 is checked once.
 // Tests switch them off to run each tier on any machine.
 var (
 	useSSE2 = true
@@ -12,20 +12,18 @@ var (
 )
 
 // asciiRun packs the leading run of units 1 to 0x7F at src into dst and
-// returns how many it packed: thirty-two per AVX2 step while more than
-// sixteen units remain, then sixteen per SSE2 step. readable is how many
-// bytes may be read from src; a step reads 64 (AVX2) or 32 (SSE2). A step
-// packs only when every unit of the name it covers passes, so the run stops
-// at the first step holding a NUL, a non-ASCII unit or a surrogate; a failed
-// AVX2 step hands its position to the SSE2 step, which may still pack the
-// first sixteen; the scalar loop takes the rest. Both loops run inside one
-// assembly call, asciiRunKernel.
+// returns how many it packed: up to thirty-two per AVX2 step while more than
+// sixteen units remain, then up to sixteen per SSE2 step. readable is how
+// many bytes may be read from src; a step reads 64 (AVX2) or 32 (SSE2). A
+// step packs only if every unit it covers passes, so the run stops at the
+// first step holding a NUL, a non-ASCII unit or a surrogate. A failed AVX2
+// step leaves its position to SSE2; the scalar loop takes the rest.
 func asciiRun(dst, src *byte, units, readable int) int {
 	return asciiRunKernel(dst, src, units, readable, useAVX2, useSSE2)
 }
 
-// asciiRunKernel is asciiRun's step loops in assembly; avx2 and sse2 say
-// which tiers may run.
+// asciiRunKernel runs both of asciiRun's step loops in one assembly call;
+// avx2 and sse2 say which tiers may run.
 //
 //go:noescape
 func asciiRunKernel(dst, src *byte, units, readable int, avx2, sse2 bool) int

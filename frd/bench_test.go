@@ -44,7 +44,7 @@ func BenchmarkAppendDir(b *testing.B) {
 					fd := openRaw(b, dir)
 					var err error
 					entries, err = l.AppendHandle(entries[:0], fd, dir)
-					closeRaw(fd)
+					mustCloseRaw(b, fd)
 					if errors.Is(err, errors.ErrUnsupported) {
 						b.Skip(err)
 					}
@@ -84,15 +84,15 @@ func benchListing(b *testing.B, dir string, files int, list func(*os.File) (int,
 			b.Fatal(err)
 		}
 		n, err := list(f)
-		f.Close()
+		mustClose(b, f)
 		if err != nil || n != files {
 			b.Fatalf("%d entries, %v; want %d", n, err, files)
 		}
 	}
 }
 
-// BenchmarkParseRecords is the user-space cost of one kernel buffer of 1,000
-// macOS attribute records, with no system call in the loop.
+// BenchmarkParseRecords is the user-space cost of parsing 1,000 macOS
+// attribute records in one buffer, with no system call in the loop.
 func BenchmarkParseRecords(b *testing.B) {
 	var rs []rec
 	for i := range 1000 {
@@ -126,8 +126,9 @@ func BenchmarkParseDirents(b *testing.B) {
 	}
 }
 
-// BenchmarkParseFullInfo is the user-space cost of one kernel buffer of 1,000
-// Windows FILE_FULL_DIR_INFO records, with no system call in the loop.
+// BenchmarkParseFullInfo is the user-space cost of parsing 1,000
+// FILE_ID_EXTD_DIR_INFO records in one buffer, with no system call in the
+// loop.
 func BenchmarkParseFullInfo(b *testing.B) {
 	var rs []finfo
 	for i := range 1000 {

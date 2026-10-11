@@ -21,7 +21,7 @@ func TestADirectoryThatCannotBeSearchedIsAPathErrorNamingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	_, err = AppendDir(nil, f)
 	pe, ok := errors.AsType[*os.PathError](err)
 	if !ok || pe.Op != listOp || pe.Path != dir || !errors.Is(err, fs.ErrPermission) {
@@ -29,9 +29,9 @@ func TestADirectoryThatCannotBeSearchedIsAPathErrorNamingIt(t *testing.T) {
 	}
 }
 
-// FAT keeps no file ids and FSKit makes them up, a new one for an empty file
-// on every listing, so the volume says its ids do not persist and the listing
-// reports none. The test attaches a FAT disk image with hdiutil.
+// A FAT volume keeps no file ids (FSKit gives an empty file a new one on
+// every listing), so it reports them as not persistent and the listing gives
+// none. The test attaches a FAT disk image with hdiutil.
 func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("attaches a disk image")
@@ -48,7 +48,11 @@ func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
 	if out, err := exec.Command(hdiutil, "attach", "-quiet", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil {
 		t.Skipf("hdiutil attach: %v: %s", err, out)
 	}
-	t.Cleanup(func() { exec.Command(hdiutil, "detach", "-quiet", "-force", mnt).Run() })
+	t.Cleanup(func() {
+		if out, err := exec.Command(hdiutil, "detach", "-quiet", "-force", mnt).CombinedOutput(); err != nil {
+			t.Errorf("hdiutil detach: %v: %s", err, out)
+		}
+	})
 	sub := filepath.Join(mnt, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -89,32 +93,31 @@ func TestTheVolumeCapabilitiesSayWhetherIDsPersist(t *testing.T) {
 	}
 }
 
-// A volume that cannot be asked keeps its ids for this listing, and is asked
+// A volume that cannot be asked gives no ids for this listing, and is asked
 // again by the next one rather than remembered.
-func TestAVolumeThatCannotBeAskedIsNotRemembered(t *testing.T) {
+func TestAVolumeThatCannotBeAskedGivesNoIDsAndIsNotRemembered(t *testing.T) {
 	const fsid = 1<<63 | 42
-	if !persistentIDs(-1, fsid) {
-		t.Fatal("a volume that cannot be asked lost its ids")
+	if persistentIDs(-1, fsid) {
+		t.Fatal("a volume that cannot be asked kept its ids")
 	}
 	if _, remembered := volumes.Load(uint64(fsid)); remembered {
 		t.Fatal("the failed answer was cached")
 	}
 }
 
-// /dev/fd holds the caller's own descriptors. The bulk call reports them as
-// no type it names and fails at one lstat cannot describe either, such as a
-// kqueue, as an error naming that entry.
+// In /dev/fd the bulk call reports every entry as irregular and fails, naming
+// the entry, at a descriptor lstat cannot describe either, such as a kqueue.
 func TestDevFdListsIrregularEntriesAndStopsAtAKqueue(t *testing.T) {
 	kq, err := unix.Kqueue()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(kq)
+	defer mustCloseRaw(t, uintptr(kq))
 	f, err := os.Open("/dev/fd")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	entries, err := AppendDir(nil, f)
 	pe, ok := errors.AsType[*os.PathError](err)
 	if !ok || pe.Op != listOp || filepath.Dir(pe.Path) != "/dev/fd" || !errors.Is(err, syscall.EBADF) {

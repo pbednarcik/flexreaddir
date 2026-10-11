@@ -5,12 +5,9 @@ import (
 	"testing"
 )
 
-// packed copies names end to end into one block in the order given, so every
-// arm reads memory front to back: without it, sorting scatters the reads over
-// the captured buffers and a corpus larger than L2 measures cache misses
-// instead of branches. cap(name) ends at the name, as the decoder may not
-// assume more; a kernel step that reads 32 bytes cannot run on a name of
-// fewer than sixteen units packed this way.
+// packed copies names end to end into one block, each name's cap ending at
+// the name, as the decoder may not assume more: a SIMD step that reads 32
+// bytes cannot run on a name shorter than sixteen units.
 func packed(names [][]byte) [][]byte {
 	total := 0
 	for _, n := range names {
@@ -28,7 +25,8 @@ func packed(names [][]byte) [][]byte {
 
 // packedSlack is packed with every name's cap running to the end of the
 // block, which has 64 bytes to spare: the shape a kernel buffer gives, where
-// the records after a name are readable and a kernel step may run on it.
+// the records after a name are readable and a SIMD step may run on it. One
+// block keeps a sorted corpus reading memory front to back.
 func packedSlack(names [][]byte) [][]byte {
 	total := 0
 	for _, n := range names {
@@ -62,8 +60,8 @@ func sweepNames(n, units int) [][]byte {
 // BenchmarkAppendUTF16Sweep decodes names of one fixed length, 4 to 24 units,
 // on every tier this binary has, in two cap shapes: tight (cap ends at the
 // name) and slack (the kernel buffer's shape), for the length at which a
-// kernel call pays for itself. The go tier of the native binary is the
-// dispatch with no kernel; under -tags purego the only tier is the scalar
+// SIMD call pays for itself. The go tier of the native binary is the
+// dispatch with no SIMD step; under -tags purego the only tier is the scalar
 // loop with no dispatch, the reference the native go tier is read against.
 func BenchmarkAppendUTF16Sweep(b *testing.B) {
 	shapes := []struct {

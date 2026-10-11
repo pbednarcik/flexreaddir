@@ -26,7 +26,7 @@ func TestAnEntryThatCannotBeStatedIsAPathErrorNamingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	_, err = AppendDir(nil, f)
 	pe, ok := errors.AsType[*os.PathError](err)
 	if !ok || pe.Op != "statx" || pe.Path != filepath.Join(dir, "a.go") || !errors.Is(err, fs.ErrPermission) {
@@ -49,22 +49,17 @@ func TestTheFstatatFallbackListsWhatStatxLists(t *testing.T) {
 	}
 }
 
-// statx mounts an automount point it is asked about unless told not to;
-// fstatat, the fallback, never does, since the kernel adds AT_NO_AUTOMOUNT to
-// it, and neither does os.Lstat. Listing a directory must not mount what is
-// in it. The flag is pinned here because no test machine has autofs to show
-// the mount.
+// Listing must not mount an automount point, as fstatat and os.Lstat never
+// do. No test machine has autofs, so the flag itself is pinned.
 func TestStatxNeverTriggersAnAutomount(t *testing.T) {
 	if statxFlags&unix.AT_NO_AUTOMOUNT == 0 {
 		t.Fatalf("statx flags %#x lack AT_NO_AUTOMOUNT, which fstatat always has", statxFlags)
 	}
 }
 
-// A seccomp filter may refuse statx with EPERM rather than ENOSYS (Docker's
-// default profile did before 18.04; a hardened container profile still may),
-// and the listing must then describe every file through fstatat. A filter
-// cannot be lifted once installed, so the test runs itself again as a child
-// process, FRD_STATX_EPERM=1, and installs it there.
+// A seccomp filter may refuse statx with EPERM rather than ENOSYS; the
+// listing must then use fstatat. A filter cannot be lifted, so the test reruns
+// itself as a child with FRD_STATX_EPERM=1 and installs it there.
 func TestAListingSurvivesStatxRefusedWithEPERM(t *testing.T) {
 	if os.Getenv("FRD_STATX_EPERM") == "" {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestAListingSurvivesStatxRefusedWithEPERM$", "-test.count=1", "-test.v")
@@ -114,7 +109,7 @@ func refuseStatx(t *testing.T) {
 		t.Fatalf("seccomp: %v", errno)
 	}
 	var stx unix.Statx_t
-	if err := unix.Statx(unix.AT_FDCWD, ".", 0, statxMask, &stx); err != unix.EPERM {
+	if err := unix.Statx(unix.AT_FDCWD, ".", 0, statxMask, &stx); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("statx answered %v, want EPERM: the filter is not in place", err)
 	}
 }

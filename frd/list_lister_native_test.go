@@ -13,7 +13,7 @@ import (
 func TestAppendHandleListsWhatAppendDirLists(t *testing.T) {
 	dir := listerTree(t)
 	fd := openRaw(t, dir)
-	defer closeRaw(fd)
+	defer mustCloseRaw(t, fd)
 	var l Lister
 	entries, err := l.AppendHandle(nil, fd, dir)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestAppendHandleLeavesTheHandleOpenAtItsEnd(t *testing.T) {
 	closed := false
 	t.Cleanup(func() {
 		if !closed {
-			closeRaw(fd)
+			mustCloseRaw(t, fd)
 		}
 	})
 	var l Lister
@@ -56,7 +56,7 @@ func TestAppendHandleOnAFileIsAPathErrorNamingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	fd := openRaw(t, file)
-	defer closeRaw(fd)
+	defer mustCloseRaw(t, fd)
 	var l Lister
 	_, err := l.AppendHandle(nil, fd, file)
 	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != file || pe.Op != listOp {
@@ -75,7 +75,7 @@ func TestAListerAllocatesItsBufferOnce(t *testing.T) {
 		dir := listerTree(t)
 		fd := openRaw(t, dir)
 		_, err := l.AppendHandle(nil, fd, dir)
-		closeRaw(fd)
+		mustCloseRaw(t, fd)
 		if err != nil {
 			t.Fatal(err)
 		}

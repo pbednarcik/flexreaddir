@@ -33,20 +33,20 @@ var (
 	idExtdDirInfo = layout{header: 88, tag: 68, id: 72}
 )
 
-// windowsEpoch is 1601-01-01, the FILETIME origin, in 100 ns units before the
-// Unix epoch.
+// windowsEpoch is the Unix epoch as a FILETIME: 100 ns intervals since
+// 1601-01-01.
 const windowsEpoch = 116444736000000000
 
 // parseFullInfo appends an Entry for each record of layout l chained in buf,
-// with one allocation for their names and at most one to grow dst. On a
-// malformed record it returns the entries before it with the error.
+// with one allocation for their names (more only if non-ASCII names outgrow
+// it) and at most one to grow dst. On a malformed record it returns the
+// entries before it with the error.
 //
-// Each name is decoded straight into one block and its string sliced from
-// there, with no copy (measured 2026-10-11).
-// A name's bytes are never written again once it is handed out: later names
-// are appended past it, asciiRun's overreach lands only past the block's
-// length, and a block that must grow is copied, leaving earlier names on the
-// old array.
+// Each name is decoded straight into the block and its string sliced from
+// there, with no copy. A name's bytes are never written again once it is
+// handed out: later names are appended past it, asciiRun's overreach lands
+// only past the block's length, and a block that must grow is copied,
+// leaving earlier names on the old array.
 func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 	units, entries := 0, 0
 	_ = eachFullInfo(buf, l, func(r fullInfo) error {
@@ -57,7 +57,7 @@ func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 	dst = slices.Grow(dst, entries)
 	// Exact for ASCII names, plus the 32 bytes asciiRun may write past the
 	// last one; names that need more UTF-8 grow the block as append does.
-	// No names, as in every empty directory: nothing to allocate.
+	// No names, as in an empty directory: nothing to allocate.
 	var block []byte
 	if units > 0 {
 		block = make([]byte, 0, units+32)

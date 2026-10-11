@@ -17,7 +17,7 @@ func readDir(t *testing.T, dir string) map[string]Entry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	entries, err := AppendDir(nil, f)
 	if err != nil {
 		t.Fatal(err)
@@ -33,9 +33,9 @@ func readDir(t *testing.T, dir string) map[string]Entry {
 	return byName
 }
 
-// dropAppleDouble removes the ._name companion macOS writes beside each file
-// it gives an extended attribute on FAT and exFAT, which keep none, so the
-// tests also pass with their directories on such a volume.
+// dropAppleDouble removes the ._name file macOS writes beside a file with
+// extended attributes on a volume that cannot store them, such as FAT or
+// exFAT, so the tests also pass there.
 func dropAppleDouble(byName map[string]Entry) {
 	for name := range byName {
 		if rest, ok := strings.CutPrefix(name, "._"); ok {
@@ -112,7 +112,7 @@ func TestAClosedDirectoryIsAPathErrorNamingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	mustClose(t, f)
 	_, err = AppendDir(nil, f)
 	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != f.Name() || !errors.Is(err, fs.ErrClosed) {
 		t.Fatalf("AppendDir on a closed directory = %v, want an *os.PathError naming it and wrapping fs.ErrClosed", err)
@@ -179,7 +179,7 @@ func TestARegularFileIsAPathErrorNamingIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	_, err = AppendDir(nil, f)
 	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Path != file {
 		t.Fatalf("AppendDir on a file = %v, want an *os.PathError naming it", err)

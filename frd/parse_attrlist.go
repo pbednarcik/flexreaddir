@@ -1,6 +1,7 @@
 package frd
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io/fs"
 	"os"
@@ -108,7 +109,9 @@ type record struct {
 // *os.PathError naming the entry when the kernel returned its name.
 // Attributes follow the returned groups in bit order, except that an entry's
 // error comes first; an attribute the kernel could not supply is absent, and
-// the returned groups say so.
+// the returned groups say so. A name is NUL-terminated, holds no other NUL,
+// and lies after the fixed-size attributes; every entry without an error has
+// one.
 func eachRecord(buf []byte, n int, visit func(record)) error {
 	le := binary.LittleEndian // every Mac is little-endian
 	at := 0
@@ -144,18 +147,22 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 			continue
 		}
 		var r record
+		var nameStart int64
 		if common&attrName != 0 {
 			ref := p
 			f, ok := field(8)
 			if !ok {
 				return ErrMalformed
 			}
-			start := int64(ref) + int64(int32(le.Uint32(f)))
-			size := int64(le.Uint32(f[4:]))
-			if size < 1 || start < 0 || start+size > int64(len(rec)) {
+			nameStart = int64(ref) + int64(int32(le.Uint32(f)))
+			size := int64(le.Uint32(f[4:])) // the length counts the NUL
+			if size < 2 || nameStart < int64(p) || nameStart+size > int64(len(rec)) {
 				return ErrMalformed
 			}
-			r.name = rec[start : start+size-1] // the length counts the NUL
+			r.name = rec[nameStart : nameStart+size-1]
+			if rec[nameStart+size-1] != 0 || bytes.IndexByte(r.name, 0) >= 0 {
+				return ErrMalformed
+			}
 		}
 		if errno != 0 {
 			if r.name == nil {
@@ -207,6 +214,9 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 				return ErrMalformed
 			}
 			r.size = int64(le.Uint64(f))
+		}
+		if r.name == nil || nameStart < int64(p) {
+			return ErrMalformed
 		}
 		visit(r)
 	}

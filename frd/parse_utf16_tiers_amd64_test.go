@@ -9,7 +9,7 @@ import (
 )
 
 // forEachTier runs f once per decoder tier this machine can run: go (no
-// kernel), sse2, and avx2 where the CPU has it, restoring the switches after.
+// SIMD), sse2, and avx2 where the CPU has it, restoring the switches after.
 func forEachTier(tb testing.TB, f func(tier string)) {
 	tb.Helper()
 	sse2, avx2 := useSSE2, useAVX2

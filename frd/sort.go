@@ -9,7 +9,7 @@ import (
 // returns. It fits slices.SortFunc, slices.BinarySearchFunc and merges.
 func CompareName(a, b Entry) int { return strings.Compare(a.Name, b.Name) }
 
-// SortByName sorts entries in place by Name in CompareName's order. It
-// allocates nothing. The sort is stable, and on the nearly sorted order a
-// kernel returns it is 1.5x to 7x faster than pdqsort (measured 2026-10-09).
+// SortByName sorts entries in place by Name in CompareName's order. It is
+// stable, allocates nothing, and is faster than slices.SortFunc on a listing
+// that is already nearly sorted, as NTFS returns it.
 func SortByName(entries []Entry) { slices.SortStableFunc(entries, CompareName) }

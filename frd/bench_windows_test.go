@@ -1,6 +1,7 @@
 package frd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -24,12 +25,12 @@ var realDirs = []struct{ name, path string }{
 func captureFullInfo(tb testing.TB, dir string) [][]byte {
 	tb.Helper()
 	fd := openRaw(tb, dir)
-	defer closeRaw(fd)
+	defer mustCloseRaw(tb, fd)
 	var bufs [][]byte
 	for {
 		buf := make([]byte, bufferBytes)
 		err := windows.GetFileInformationByHandleEx(windows.Handle(fd), windows.FileIdExtdDirectoryInfo, &buf[0], uint32(len(buf)))
-		if err == syscall.ERROR_NO_MORE_FILES {
+		if errors.Is(err, syscall.ERROR_NO_MORE_FILES) {
 			return bufs
 		}
 		if err != nil {
@@ -136,7 +137,7 @@ func BenchmarkListReal(b *testing.B) {
 			var entries []Entry
 			list := func() int {
 				fd := openRaw(b, d.path)
-				defer closeRaw(fd)
+				defer mustCloseRaw(b, fd)
 				var err error
 				if entries, err = l.AppendHandle(entries[:0], fd, d.path); err != nil {
 					b.Fatal(err)
@@ -169,12 +170,9 @@ func byLength(names [][]byte) [][]byte {
 
 // BenchmarkAppendUTF16Real decodes every name of a corpus once per iteration,
 // in kernel order, and reports the cost per name and per code unit. Names
-// are packed with slack (see packedSlack): each cap runs on past the name,
-// as it does inside a kernel buffer, so a kernel step may run on a short
-// name (with cap ending at the name it cannot, measured 2026-10-09). The
-// fixed arm is the eleven-unit shape of the synthetic benchmarks and the
-// bylength arms the same names sorted by length, for the question whether a
-// learned loop exit flatters them.
+// are packed with slack (packedSlack), as inside a kernel buffer. The fixed11
+// arm is the synthetic benchmarks' eleven-unit shape; the bylength arms hold
+// the same names sorted by length, the control for a learned loop exit.
 func BenchmarkAppendUTF16Real(b *testing.B) {
 	type set struct {
 		label string
@@ -284,7 +282,7 @@ func BenchmarkSortListing(b *testing.B) {
 			continue
 		}
 		orig, err := AppendDir(nil, f)
-		f.Close()
+		mustClose(b, f)
 		if err != nil {
 			b.Fatal(err)
 		}

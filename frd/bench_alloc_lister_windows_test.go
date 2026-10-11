@@ -11,7 +11,7 @@ import (
 
 // What AppendHandle adds to opening and closing a raw handle on a 100-file
 // directory, with a Lister that has its buffer: the names, nothing else.
-// Windows only, the one platform where the count was measured.
+// The count is pinned on Windows only.
 func TestAppendHandleAllocatesOnlyTheNames(t *testing.T) {
 	dir := t.TempDir()
 	for i := range 100 {
@@ -20,7 +20,7 @@ func TestAppendHandleAllocatesOnlyTheNames(t *testing.T) {
 		}
 	}
 	openClose := testing.AllocsPerRun(50, func() {
-		closeRaw(openRaw(t, dir))
+		mustCloseRaw(t, openRaw(t, dir))
 	})
 	var l Lister
 	entries := make([]Entry, 0, 200)
@@ -28,7 +28,7 @@ func TestAppendHandleAllocatesOnlyTheNames(t *testing.T) {
 		fd := openRaw(t, dir)
 		var err error
 		entries, err = l.AppendHandle(entries[:0], fd, dir)
-		closeRaw(fd)
+		mustCloseRaw(t, fd)
 		if err != nil || len(entries) != 100 {
 			t.Fatal(len(entries), err)
 		}

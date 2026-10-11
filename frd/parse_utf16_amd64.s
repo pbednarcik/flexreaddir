@@ -2,18 +2,19 @@
 
 #include "textflag.h"
 
-// The kernel packs first and tests after. PACKUSWB saturates a unit of 0x100
-// to 0x7FFF to 0xFF and a unit of 0x8000 or more, signed negative, to 0, so a
-// signed compare "greater than zero" on the packed bytes holds exactly for
-// units 1 to 0x7F: NUL, every non-ASCII unit and every surrogate fail it.
-// Units past the name are masked out of the test; the store writes the whole
-// step, which the caller has room for. Loads and stores are unaligned, since
-// Go aligns no slice (A-11.4, K-7.7). Plan 9 order is source first.
+// Each step packs first and tests after. PACKUSWB keeps units 0x80 to 0xFF as
+// they are, saturates 0x100 to 0x7FFF to 0xFF and units of 0x8000 or more,
+// signed negative, to 0, so a signed compare "greater than zero" on the packed
+// bytes holds exactly for units 1 to 0x7F: NUL, every non-ASCII unit and
+// every surrogate fail it. Units past the name are masked out of the test;
+// the store writes the whole step, which the caller has room for. Loads and
+// stores are unaligned: a name and its output may start at any offset. Plan 9
+// order is source first.
 
 // func asciiRunKernel(dst, src *byte, units, readable int, avx2, sse2 bool) int
 //
 // asciiRun's two step loops in one call, so a name pays one call however many
-// steps it takes (M-25.22; measured 2026-10-11).
+// steps it takes.
 // While avx2, n+16 < units and readable-2n >= 64, an AVX2 step packs the
 // thirty-two units at src+2n; then, while sse2, n < units and
 // readable-2n >= 32, an SSE2 step packs sixteen. A step's mask keeps only the
@@ -22,12 +23,12 @@
 // a failed SSE2 step ends the run.
 //
 // AVX2 step: VPACKUSWB packs within each 128-bit lane (units 0-7, 16-23 |
-// 8-15, 24-31), so VPERMQ $0xD8 puts the quadwords back in order (K-7.5).
+// 8-15, 24-31), so VPERMQ $0xD8 puts the quadwords back in order.
 // VZEROUPPER runs once the AVX2 loop is left, before any legacy SSE
-// instruction and before RET, since the Go code around it is legacy SSE
-// (A-13.6, K-7.6). SSE2 step: legacy encodings only; PACKUSWB X1, X0 is Intel
-// packuswb xmm0, xmm1 (units 0-7, then 8-15); PCMPGTB X2, X3 is pcmpgtb xmm3,
-// xmm2, so X3 = X3 > 0.
+// instruction and before RET, since the Go code around it is legacy SSE.
+// SSE2 step: legacy encodings only; PACKUSWB X1, X0 is Intel packuswb xmm0,
+// xmm1 (units 0-7, then 8-15); PCMPGTB X2, X3 is pcmpgtb xmm3, xmm2, so
+// X3 = X3 > 0.
 //
 // Registers: DI dst, SI src, BX units, R9 readable, AX n, R13 m, R8 mask,
 // CX shift count, DX movemask, R10, R11 and R12 scratch.

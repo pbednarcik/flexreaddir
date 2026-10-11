@@ -36,7 +36,7 @@ func exampleTree() (string, func()) {
 			log.Fatal(err)
 		}
 	}
-	return root, func() { os.RemoveAll(root) }
+	return root, func() { _ = os.RemoveAll(root) }
 }
 
 // list opens dir, lists it and closes it. Entries come in no particular
@@ -46,7 +46,7 @@ func list(dir string, entries []frd.Entry) []frd.Entry {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	entries, err = frd.AppendDir(entries, f)
 	if err != nil {
 		log.Fatal(err)
@@ -63,7 +63,7 @@ func ExampleAppendDir() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	entries, err := frd.AppendDir(nil, f)
 	if err != nil {
 		log.Fatal(err)
@@ -96,7 +96,7 @@ func ExampleAppendDir_reuse() {
 			log.Fatal(err)
 		}
 		entries, err = frd.AppendDir(entries[:0], f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -135,8 +135,8 @@ func Example_walk() {
 }
 
 // A walker keeps one Lister per goroutine, so the buffer the kernel fills is
-// allocated once for the whole walk, and again for the next walk if the
-// walker keeps its Listers.
+// allocated once per walk, or once for all walks if the walker keeps its
+// Listers between them.
 func ExampleLister() {
 	root, cleanup := exampleTree()
 	defer cleanup()
@@ -153,7 +153,7 @@ func ExampleLister() {
 			log.Fatal(err)
 		}
 		entries, err = l.AppendDir(entries[:0], f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -181,7 +181,7 @@ func ExampleLister_AppendHandle() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var l frd.Lister
 	entries, err := l.AppendHandle(nil, f.Fd(), f.Name())
@@ -245,7 +245,7 @@ func ExampleErrMalformed() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = frd.AppendDir(nil, f)
 	switch {
 	case errors.Is(err, frd.ErrMalformed):

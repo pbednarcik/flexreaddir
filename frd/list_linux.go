@@ -37,7 +37,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 	}
 	for {
 		n, err := unix.Getdents(fd, buf)
-		if err == syscall.EINTR {
+		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil || n == 0 {
@@ -51,11 +51,10 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 
 const statxMask = unix.STATX_TYPE | unix.STATX_SIZE | unix.STATX_MTIME | unix.STATX_CTIME | unix.STATX_INO
 
-// statxFlags: the name itself, never a symlink's target; and never mount an
-// automount point to describe it, as fstatat and os.Lstat never do (the
-// kernel adds AT_NO_AUTOMOUNT to them; statx(2) asks directory scanners to
-// pass it). Only regular files and DT_UNKNOWN entries are statted, so only an
-// automount point on a filesystem that reports DT_UNKNOWN could be reached.
+// statxFlags stat the name itself, never a symlink's target, and never mount
+// an automount point to describe it. fstatat and os.Lstat never mount one
+// either: the kernel adds AT_NO_AUTOMOUNT to them, and statx(2) asks
+// directory scanners to pass it.
 const statxFlags = unix.AT_SYMLINK_NOFOLLOW | unix.AT_NO_AUTOMOUNT
 
 // noStatx is set once statx is known to be unavailable: a kernel older than
@@ -99,7 +98,7 @@ func fstatat(fd int, name []byte, stx *unix.Statx_t) error {
 	var st unix.Stat_t
 	for {
 		err := unix.Fstatat(fd, string(name), &st, unix.AT_SYMLINK_NOFOLLOW)
-		if err == syscall.EINTR {
+		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil {

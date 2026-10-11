@@ -18,7 +18,11 @@ func refuseSearch(t *testing.T, dir string) {
 	if err := os.Chmod(dir, 0o400); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
 	info, err := os.Stat(dir)
 	if err != nil {
 		t.Fatal(err)

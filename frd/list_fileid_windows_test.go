@@ -19,8 +19,8 @@ type fileIDInfo struct {
 
 // fileIndex is name's file id as its own handle reports it, in the form the
 // listing gives: the 64-bit index when FILE_ID_INFO's high half is 0, else 0.
-// The two calls are checked against each other, so the oracle is not one
-// number read twice.
+// FILE_ID_INFO is checked against GetFileInformationByHandle's file index,
+// so the expected id comes from two independent calls.
 func fileIndex(t *testing.T, name string) uint64 {
 	t.Helper()
 	p, err := windows.UTF16PtrFromString(name)
@@ -33,7 +33,7 @@ func fileIndex(t *testing.T, name string) uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(h)
+	defer mustCloseRaw(t, uintptr(h))
 	var fii fileIDInfo
 	if err := windows.GetFileInformationByHandleEx(h, windows.FileIdInfo, (*byte)(unsafe.Pointer(&fii)), uint32(unsafe.Sizeof(fii))); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func fileIndex(t *testing.T, name string) uint64 {
 func onNTFS(t *testing.T, dir string) bool {
 	t.Helper()
 	h := openRaw(t, dir)
-	defer closeRaw(h)
+	defer mustCloseRaw(t, h)
 	var fsName [windows.MAX_PATH + 1]uint16
 	if err := windows.GetVolumeInformationByHandle(windows.Handle(h), nil, 0, nil, nil, nil, &fsName[0], uint32(len(fsName))); err != nil {
 		t.Fatal(err)
@@ -72,10 +72,8 @@ func withClass(t *testing.T, class uint32) {
 	t.Cleanup(func() { listClass = windows.FileIdExtdDirectoryInfo })
 }
 
-// The default class is FILE_ID_EXTD_DIR_INFO (the owner's ruling: the
-// identity is worth the measured 5 to 9% of a warm listing). The same
-// directory listed with FILE_FULL_DIR_INFO carries no FileID and agrees in
-// every other field.
+// The default class is FILE_ID_EXTD_DIR_INFO. The same directory listed with
+// FILE_FULL_DIR_INFO carries no FileID and agrees in every other field.
 func TestTheFullClassListsTheSameWithoutFileIDs(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"a", "b"} {
@@ -192,9 +190,9 @@ func TestARefusedFileIDClassFallsBackToTheFullListing(t *testing.T) {
 	}
 }
 
-// A filesystem may refuse the class with a code no one measured (a filter
-// driver, a user-mode filesystem); the listing must still work wherever the
-// old class does.
+// A filesystem may refuse the class with any other code (a filter driver, a
+// user-mode filesystem); the listing must still work wherever the old class
+// does.
 func TestAnyFirstCallFailureFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("x"), 0o644); err != nil {
@@ -210,7 +208,8 @@ func TestAnyFirstCallFailureFallsBack(t *testing.T) {
 	}
 }
 
-// An empty root's ERROR_FILE_NOT_FOUND is not a refusal.
+// Every error but the end of the listing and an empty root's
+// ERROR_FILE_NOT_FOUND counts as a refusal.
 func TestOnlyARefusalTriggersTheFallback(t *testing.T) {
 	for _, err := range []error{windows.ERROR_INVALID_PARAMETER, windows.ERROR_NOT_SUPPORTED, windows.ERROR_INVALID_FUNCTION, windows.ERROR_CALL_NOT_IMPLEMENTED, windows.ERROR_ACCESS_DENIED} {
 		if !refused(err) {
@@ -224,8 +223,8 @@ func TestOnlyARefusalTriggersTheFallback(t *testing.T) {
 	}
 }
 
-// A FAT volume refuses FILE_ID_EXTD_DIR_INFO (measured 2026-10-09). Set
-// FRD_FAT_DIR to a directory on one to run this.
+// A FAT volume refuses FILE_ID_EXTD_DIR_INFO. Set FRD_FAT_DIR to a directory
+// on one to run this.
 func TestAFATVolumeListsWithoutFileIDs(t *testing.T) {
 	dir := os.Getenv("FRD_FAT_DIR")
 	if dir == "" {

@@ -28,7 +28,7 @@ func identity(t *testing.T, name string) (changeNanos int64, fileID uint64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(h)
+	defer mustCloseRaw(t, uintptr(h))
 	var fbi fileBasicInfo
 	if err := windows.GetFileInformationByHandleEx(h, windows.FileBasicInfo, (*byte)(unsafe.Pointer(&fbi)), uint32(unsafe.Sizeof(fbi))); err != nil {
 		t.Fatal(err)

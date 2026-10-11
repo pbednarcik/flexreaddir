@@ -145,11 +145,12 @@ func ReadDir(name string) ([]Entry, error)
 |---|---|---|
 | `name` | `string` | The path of the directory to list. |
 | **returns** | `[]Entry` | Its entries, sorted by name; an empty, non-nil slice for an empty directory. |
-| **returns** | `error` | `nil`, or an `*os.PathError`: from the open, `ENOTDIR` for a name that is not a directory, or from the listing, with the entries read before it. |
+| **returns** | `error` | `nil`, or an `*os.PathError`: from the open, `ENOTDIR` for a name that is not a directory, or from the listing or an entry's stat, with the entries read before it. |
 
-It behaves as `os.ReadDir` does: the same order, the same errors and the same
-empty slice. It borrows a pooled buffer, as the function `AppendDir` does; a
-walker keeps a [`Lister`](#lister) instead.
+It returns the same order and the same empty slice as `os.ReadDir`. Its errors
+can differ, since it also stats every file: see the platform notes under
+[`AppendDir`](#appenddir). It borrows a pooled buffer, as the function
+`AppendDir` does; a walker keeps a [`Lister`](#lister) instead.
 
 ### `AppendDir`
 
@@ -173,13 +174,16 @@ one `Entry` per name to `dst`.
 - A symbolic link is reported as a link and not followed; a Windows junction
   is `fs.ModeIrregular`, as `os.ReadDir` reports it since Go 1.23.
 - A name removed between the read and its stat is left out.
+- Don't mix it with the file's own `ReadDir`, `Readdir` or `Readdirnames`:
+  they buffer entries the native listing cannot see. Reopen the directory to
+  switch.
 
 ```go
 f, err := os.Open(dir)
 if err != nil {
 	return err
 }
-defer f.Close()
+defer func() { _ = f.Close() }()
 
 entries, err := frd.AppendDir(nil, f)
 if err != nil {
@@ -204,7 +208,7 @@ for _, dir := range dirs {
 		return err
 	}
 	entries, err = frd.AppendDir(entries[:0], f)
-	f.Close()
+	_ = f.Close()
 	if err != nil {
 		return err
 	}
@@ -304,7 +308,7 @@ filled for regular files only and is zero for every other type.
 - **`FileID`** is zero where the volume gives none: on Windows ReFS and Dev
   Drive (128-bit ids), FAT, WSL's 9P and shares on servers older than Windows
   Server 2025; on macOS a volume whose ids do not persist, such as FAT32, exFAT
-  and NFS. Zero means unknown, never equal. The record that carries it costs a
+  and NFS, or that cannot be asked. Zero means unknown, never equal. The record that carries it costs a
   warm Windows listing 1.7 to 3.2%, the price of the identity.
 - With both, a walker can tell a file replaced by another from one rewritten
   in place.

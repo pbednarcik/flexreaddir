@@ -19,6 +19,9 @@ func FuzzRecords(f *testing.F) {
 			t.Fatalf("%d records claimed, %d entries returned", n, len(got))
 		}
 		for _, e := range got {
+			if e.Name == "" || strings.IndexByte(e.Name, 0) >= 0 {
+				t.Fatalf("listed the name %q", e.Name)
+			}
 			if e.Type != 0 && (e.Size != 0 || e.ModTimeNanos != 0 || e.ChangeTimeNanos != 0 || e.FileID != 0) {
 				t.Fatalf("%+v: only a regular file carries a size, its times and its id", e)
 			}

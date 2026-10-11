@@ -63,7 +63,8 @@ func TestReadDirOfAnEmptyDirectoryIsAnEmptyNonNilSlice(t *testing.T) {
 	}
 }
 
-// Go adds the \\?\ prefix for a long path on Windows.
+// A directory past MAX_PATH lists on Windows, where os.Open adds the \\?\
+// prefix.
 func TestReadDirListsADirectoryBeyondMaxPath(t *testing.T) {
 	dir := t.TempDir()
 	deep := dir

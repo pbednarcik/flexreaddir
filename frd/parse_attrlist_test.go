@@ -123,9 +123,8 @@ func TestAFileWithoutAChangeTimeTakesItsModificationTime(t *testing.T) {
 	}
 }
 
-// FAT32, exFAT and NFS do not keep an id across mounts, and FSKit gives an
-// empty FAT file a new one on every listing, so a file on a volume whose ids
-// do not persist carries none. The question is the volume's, per record.
+// A regular file on a volume whose ids do not persist carries no FileID; the
+// volume is looked up by each record's fsid.
 func TestAFileOnAVolumeWhoseIDsDoNotPersistHasNoFileID(t *testing.T) {
 	buf := records(
 		rec{common: every, file: attrDataLength, name: "fat.go", fsid: 7, objtype: typeRegular, sec: 1, chg: 2, fileID: 9, size: 3},
@@ -245,6 +244,19 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 		binary.LittleEndian.PutUint32(b, uint32(len(b)))
 		return b
 	}
+	// With every common attribute, the name's reference sits at 28, after the
+	// length, the groups and the error, and the fsid at 36.
+	file := rec{common: every, file: attrDataLength, name: "a.go", fsid: 0x41414141, objtype: typeRegular, size: 1}
+	unterminated := file.bytes()
+	le := binary.LittleEndian
+	end := 28 + int(int32(le.Uint32(unterminated[28:]))) + int(le.Uint32(unterminated[32:])) - 1
+	unterminated[end] = 'x'
+	intoFixed := file.bytes()
+	le.PutUint32(intoFixed[28:], 8) // "AAAA" and a NUL, read from the fsid
+	noName := file
+	noName.common &^= attrName
+	withNUL := file
+	withNUL.name = "a\x00b"
 	for name, c := range map[string]struct {
 		buf []byte
 		n   int
@@ -256,6 +268,10 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 		"a change time cut short":          {cut(rec{common: attrChgtime}, 8), 1},
 		"a file id cut short":              {cut(rec{common: attrFileID}, 4), 1},
 		"a volume id cut short":            {cut(rec{common: attrFsid}, 4), 1},
+		"a file with no name":              {noName.bytes(), 1},
+		"a NUL inside the name":            {records(withNUL), 1},
+		"a name without its NUL":           {unterminated, 1},
+		"a name inside the fixed fields":   {intoFixed, 1},
 	} {
 		if _, err := parseRecords(nil, c.buf, c.n, keepIDs); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: parseRecords error = %v, want ErrMalformed", name, err)

@@ -20,9 +20,9 @@ func utf16le(units []uint16) []byte {
 // Every tier must give the scalar reference's bytes and verdict, whatever
 // sits inside or after its steps.
 func TestEveryTierAgreesWithTheScalarReference(t *testing.T) {
-	long := utf16.Encode([]rune(strings.Repeat("abcdefgh", 9) + "ijk")) // 75 units: two AVX2 steps, then SSE2
+	long := utf16.Encode([]rune(strings.Repeat("abcdefgh", 9) + "ijk")) // 75 units: two AVX2 steps and a tail
 	cases := [][]uint16{nil, long[:1], long[:3], long[:4], long[:15], long[:16], long[:17], long[:31], long[:32], long[:33], long[:48], long[:64], long[:65], long}
-	for at := range 68 { // every position across the first two AVX2 steps and the SSE2 step after
+	for at := range 68 { // every position in the first two AVX2 steps, and into the step after
 		for _, ins := range [][]uint16{{0}, {0x7F}, {0x80}, {0xDF}, {0x100}, {0x20AC}, {0x7FFF}, {0x8000}, {0xD83D, 0xDE42}, {0xD83D}, {0xDE42}, {0xFFFF}} {
 			u := append(append(append([]uint16{}, long[:at]...), ins...), long[at:]...)
 			cases = append(cases, u)
@@ -46,9 +46,9 @@ func TestEveryTierAgreesWithTheScalarReference(t *testing.T) {
 	})
 }
 
-// A kernel that never packs would pass every differential test, since the
-// scalar loop decodes what it rejects; this pins that each SIMD tier packs.
-func TestEveryKernelTierPacksAnASCIIRun(t *testing.T) {
+// A SIMD tier that never packs would pass every differential test, since the
+// scalar loop decodes what it rejects; this pins that each one packs.
+func TestEverySIMDTierPacksAnASCIIRun(t *testing.T) {
 	// 40 units with 64 readable bytes after them, as inside a kernel buffer:
 	// every step has room to read.
 	src := append(utf16le(utf16.Encode([]rune(strings.Repeat("abcdefgh", 5)))), make([]byte, 64)...)
@@ -83,12 +83,13 @@ func TestEveryTierIgnoresWhatFollowsAName(t *testing.T) {
 	})
 }
 
-// Every tier against the scalar reference on every name shape the kernel can
-// tell apart: each length from 0 to 255 units (a Windows name's limit), all
-// ASCII, or with one unit at each of the pack's saturation boundaries at each
-// position. Each name ends at its readable bound, at the slacks either side of
-// a step's 32- and 64-byte reads, and the page after that bound faults where
-// the platform allows (guardedPage): a step that reads past readable crashes.
+// Every tier against the scalar reference on every name shape the SIMD steps
+// can tell apart: each length from 0 to 255 units (a Windows name's limit),
+// all ASCII, or with one unit at each of the pack's saturation boundaries at
+// each position. Each name ends 0 to 65 bytes before its readable bound, at
+// the slacks either side of a step's 32- and 64-byte reads, and the page after
+// the bound faults where the platform allows (guardedPage): a step that reads
+// past readable crashes.
 // Fuzzing cannot stand in for this; coverage guidance does not see assembly,
 // and random units are almost never a run of ASCII long enough to step.
 func TestEveryTierAgreesOnEveryNameShape(t *testing.T) {

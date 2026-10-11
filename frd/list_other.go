@@ -23,7 +23,10 @@ func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 			if err != nil {
 				return dst, err
 			}
-			e.Size, e.ModTimeNanos = info.Size(), info.ModTime().UnixNano()
+			// The name may have been replaced since the read: the stat decides.
+			if e.Type = info.Mode().Type(); e.Type.IsRegular() {
+				e.Size, e.ModTimeNanos = info.Size(), info.ModTime().UnixNano()
+			}
 		}
 		dst = append(dst, e)
 	}

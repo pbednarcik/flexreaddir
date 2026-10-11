@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// rawFiles keeps the os.File behind each descriptor openRaw returns alive
-// until closeRaw, so the tests build here; AppendHandle is unsupported on
-// these platforms.
+// rawFiles keeps each descriptor's os.File reachable until closeRaw, so its
+// finalizer cannot close it. openRaw exists here only so the shared tests
+// build; AppendHandle is unsupported on these platforms.
 var rawFiles sync.Map
 
 func openRaw(tb testing.TB, path string) uintptr {

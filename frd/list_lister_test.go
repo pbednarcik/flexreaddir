@@ -44,7 +44,7 @@ func TestAListerListsWhatAppendDirLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer mustClose(t, f)
 	var l Lister
 	entries, err := l.AppendDir(nil, f)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestOneListerServesManyDirectories(t *testing.T) {
 			t.Fatal(err)
 		}
 		entries, err = l.AppendDir(entries[:0], f)
-		f.Close()
+		mustClose(t, f)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,10 @@ func TestConcurrentListingsAgree(t *testing.T) {
 				} else {
 					entries, err = l.AppendDir(entries[:0], f)
 				}
-				f.Close()
+				if cerr := f.Close(); cerr != nil {
+					t.Error(cerr)
+					return
+				}
 				if err != nil {
 					t.Error(err)
 					return
