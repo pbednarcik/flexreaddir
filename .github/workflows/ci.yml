@@ -55,6 +55,8 @@ jobs:
             GOOS=$goos "$(go env GOPATH)/bin/staticcheck" ./...
           done
       - name: vet the benchmark module
+        # The bench module is kept in the internal repository only.
+        if: hashFiles('bench/go.mod') != ''
         working-directory: bench
         run: go vet ./... && "$(go env GOPATH)/bin/staticcheck" ./...
 

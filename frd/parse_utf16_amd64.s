@@ -13,7 +13,7 @@
 // func asciiRunKernel(dst, src *byte, units, readable int, avx2, sse2 bool) int
 //
 // asciiRun's two step loops in one call, so a name pays one call however many
-// steps it takes (M-25.22; measured in docs/notes/evidence/2026-10-11-decoder-hypotheses.md).
+// steps it takes (M-25.22; measured 2026-10-11).
 // While avx2, n+16 < units and readable-2n >= 64, an AVX2 step packs the
 // thirty-two units at src+2n; then, while sse2, n < units and
 // readable-2n >= 32, an SSE2 step packs sixteen. A step's mask keeps only the

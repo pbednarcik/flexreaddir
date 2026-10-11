@@ -42,7 +42,7 @@ const windowsEpoch = 116444736000000000
 // malformed record it returns the entries before it with the error.
 //
 // Each name is decoded straight into one block and its string sliced from
-// there, with no copy (measured, docs/notes/evidence/2026-10-11-decoder-hypotheses.md).
+// there, with no copy (measured 2026-10-11).
 // A name's bytes are never written again once it is handed out: later names
 // are appended past it, asciiRun's overreach lands only past the block's
 // length, and a block that must grow is copied, leaving earlier names on the

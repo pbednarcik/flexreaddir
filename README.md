@@ -59,9 +59,6 @@ What is left is the system call each platform needs. Profiled:
 - **Windows**: NTFS is 84 to 90% of a listing; FlexReadDir's own code was 7 to
   13% before v0.4.0's name decoder cut its parsing by 9 to 14%.
 
-The rows are in [`docs/notes`](docs/notes): `2026-10-10-macos-rows-retaken.md`,
-`2026-10-11-linux-profile-docker.md` and `2026-10-11-windows-kernel-trace.md`.
-
 ### Machines and method
 
 - **macOS**: Apple M5 Max, 128 GB, macOS 27.0, APFS on the internal SSD, Go
@@ -85,10 +82,8 @@ for i in $(seq 10); do go test ./frd -run '^$' -bench 'AppendDir' -benchmem -cou
 Not measured yet: Linux on real hardware, Intel machines, a cold file cache
 and network filesystems.
 
-FlexReadDir lists one directory; it does not walk trees. Walkers are compared
-with each other by the walker built on it; the tree walks measured so far, and
-what they found about opening directories, worker counts and the garbage
-collector, are in [`docs/notes`](docs/notes) and the [`bench`](bench) module.
+FlexReadDir lists one directory; it does not walk trees, so it is compared with
+the standard library's listing, not with tree walkers.
 
 ### Why each platform is faster
 
@@ -106,7 +101,7 @@ collector, are in [`docs/notes`](docs/notes) and the [`bench`](bench) module.
   `Entry` with its name in a shared allocation. Names are decoded from UTF-16
   thirty-two units at a time with AVX2, sixteen with SSE2 on any other amd64,
   and one at a time in Go elsewhere and with `-tags purego`, all three tested
-  against each other ([`docs/decoder-kernel.md`](docs/decoder-kernel.md)). A
+  against each other and exhaustively over every name shape. A
   junction is `fs.ModeIrregular`, as `os.ReadDir` reports it since Go 1.23.
 - **Everywhere**: `AppendDir` appends to a slice you can reuse across
   directories, so a listing allocates a handful of times whatever its size.
@@ -206,10 +201,9 @@ A kept `Lister` saves the buffers the pool drops at each garbage collection: a
 parallel walk of the kernel source allocated 3.7 MiB against 19.6 MiB on
 Windows, 3.4 MiB against 8.6 MiB on the Mac. On Windows the collector is also
 a parallel walker's largest cost: with `GOGC=400` the same walk ran 43 to 49%
-faster ([the rows](docs/notes/evidence/2026-10-10-buffer-and-gc-windows.md)); a
+faster; a
 long-lived walker can set it around the walk with `debug.SetGCPercent`. On
-macOS the walk is the kernel's time, within 2.5% with the collector on or off
-([the rows](docs/notes/evidence/2026-10-08-lister-macos.md)).
+macOS the walk is the kernel's time, within 2.5% with the collector on or off.
 
 ### `CompareName` and `SortByName`
 
@@ -261,7 +255,7 @@ modification time instead, as `lstat` does. `FileID` comes from
 `ATTR_CMN_FILEID` on macOS, `stx_ino` on Linux and the listing's
 `FILE_ID_EXTD_DIR_INFO` `FileId` on Windows when it fits 64 bits, as on NTFS;
 that class costs a warm listing 1.7 to 3.2% over `FILE_FULL_DIR_INFO` when
-last measured (`docs/notes/evidence/2026-10-09-fileid-windows.md`), the price
+last measured (2026-10-11), the price
 of the identity. It is zero where the volume gives none: on Windows ReFS and Dev Drive
 (128-bit ids), FAT, WSL's 9P and shares on servers older than Windows Server
 2025; on macOS a volume that says its ids do not persist, such as FAT32, exFAT
@@ -344,9 +338,6 @@ not frozen until v1. CI runs the tests on Linux (amd64 and arm64), macOS
 current release, again with the name decoder's assembly turned off; and it
 fuzzes the three record parsers and the name decoder on each of the three
 with the current release. The fallback for other systems is vetted, not run.
-
-The measurements behind every number in this file, and the questions they
-settled, are under [`docs/notes`](docs/notes), one dated file per question.
 
 ## Requirements
 
