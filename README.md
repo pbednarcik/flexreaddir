@@ -122,9 +122,12 @@ Memory for the sequential walk: `ReadDir` + `Info` 1.67 M allocations and
 196 MiB, fastwalk 1.89 M and 209 MiB, FlexReadDir 929 k and 150 MiB; the
 counts include the walk's own path joins and directory opens. On this tree
 each directory costs the walk about 33 µs on one core, and most of that is
-opening the directory handle, which the walker does before FlexReadDir is
-called. A walker that opens each child with `NtCreateFile` relative to its
-parent's handle, and builds no paths, walks this tree 16% faster on one core
+opening and closing the directory handle, which the walker does around
+FlexReadDir's listing (a trace on the kernel source: opening 37% of a walk's
+CPU, closing 22%, listing 26%;
+[the rows](docs/notes/evidence/2026-10-11-windows-kernel-trace.md)). A
+walker that opens each child with `NtCreateFile` relative to its parent's
+handle, and builds no paths, walks this tree 16% faster on one core
 and 9.5% faster in parallel, and the kernel source 17% faster on one core
 ([the rows](docs/notes/evidence/2026-10-11-relative-open-and-workers-windows.md));
 on macOS and Linux the same walker saved 0 to 2%.
