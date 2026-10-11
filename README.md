@@ -148,7 +148,7 @@ func ReadDir(name string) ([]Entry, error)
 | **returns** | `error` | `nil`, or an `*os.PathError`: from the open, `ENOTDIR` for a name that is not a directory, or from the listing or an entry's stat, with the entries read before it. |
 
 It returns the same order and the same empty slice as `os.ReadDir`. Its errors
-can differ, since it also stats every file: see the platform notes under
+can differ, since it also reads each file's metadata: see the platform notes under
 [`AppendDir`](#appenddir). It borrows a pooled buffer, as the function
 `AppendDir` does; a walker keeps a [`Lister`](#lister) instead.
 
@@ -308,8 +308,8 @@ filled for regular files only and is zero for every other type.
 - **`FileID`** is zero where the volume gives none: on Windows ReFS and Dev
   Drive (128-bit ids), FAT, WSL's 9P and shares on servers older than Windows
   Server 2025; on macOS a volume whose ids do not persist, such as FAT32, exFAT
-  and NFS, or that cannot be asked. Zero means unknown, never equal. The record that carries it costs a
-  warm Windows listing 1.7 to 3.2%, the price of the identity.
+  and NFS, or that cannot be asked. Zero means unknown, never equal. The record
+  that carries it costs a warm Windows listing 1.7 to 3.2%.
 - With both, a walker can tell a file replaced by another from one rewritten
   in place.
 
@@ -398,7 +398,7 @@ The buffers the kernel fills, macOS attribute records, Linux `getdents64`
 records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
 bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
 hold what it claims is `ErrMalformed`, never a panic. The assembly is two small pieces: the
-macOS trampoline above, and the amd64 name kernel, which reads at most 62 bytes past a name,
+macOS trampoline above, and the amd64 SIMD decoder, which reads at most 30 bytes past a name,
 always inside the buffer the Go walk has bounded, and is tested exhaustively and fuzzed against
 the Go decoder, which `-tags purego` selects. Windows needs no
 trampoline: `GetFileInformationByHandleEx` comes from `golang.org/x/sys/windows`.

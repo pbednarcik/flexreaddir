@@ -77,10 +77,10 @@ func statx(fd int, name []byte, stx *unix.Statx_t) error {
 		case syscall.ENOSYS:
 			noStatx.Store(true)
 		case syscall.EPERM:
-			// A seccomp filter refusing statx answers EPERM (Docker's default
-			// profile did before 18.04), and so may a filesystem refusing
-			// this one name. fstatat decides: if it can stat the name, statx
-			// is what was refused, and fstatat serves from here on.
+			// A seccomp filter refusing statx answers EPERM, and so may a
+			// filesystem refusing this one name. fstatat decides: if it can
+			// stat the name, statx is what was refused, and fstatat serves
+			// from here on.
 			if err := fstatat(fd, name, stx); err != nil {
 				return err
 			}

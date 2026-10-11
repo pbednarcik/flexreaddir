@@ -48,9 +48,8 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 
 // volumes holds, by fsid, whether each volume seen keeps its file ids:
 // FAT32, exFAT and NFS clear VOL_CAP_FMT_PERSISTENTOBJECTIDS, and FSKit gives
-// an empty FAT file a new id on every listing. An fsid is a device and a file
-// system type, so a later volume of the same type on a reused device takes
-// the earlier one's answer.
+// an empty FAT file a new id on every listing. The answer is kept for the
+// life of the process, so a later volume given the same fsid takes it.
 var volumes sync.Map
 
 // persistentIDs reports whether the volume fsid keeps its file ids, asking

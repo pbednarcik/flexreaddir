@@ -100,9 +100,6 @@ func AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDir(dst, dir)
 }
 
-// Lister is declared with each platform's state, in list_native.go and
-// list_other.go.
-
 // AppendDir is the function [AppendDir] with the Lister's buffer.
 func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return l.appendDir(dst, dir)

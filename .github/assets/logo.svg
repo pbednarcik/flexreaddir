@@ -5,7 +5,6 @@
     @media (prefers-color-scheme: dark) { .ink { stroke: #e6edf3; } }
   </style>
   <defs>
-    <!-- Periwinkle Islands: the frame's periwinkle to the accent purple -->
     <linearGradient id="flex" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#7B8CF0"/>
       <stop offset="1" stop-color="#5C2D91"/>
@@ -24,7 +23,7 @@
     <path d="M30 62 H48"/>
   </g>
 
-  <!-- wordmark: monoline strokes, cap height 60 before scaling; "Flex" as in FlexMCP -->
+  <!-- wordmark: monoline strokes, cap height 60 before scaling -->
   <g transform="translate(106 5) scale(0.9)" fill="none" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
     <g stroke="url(#flexText)">
       <path d="M0 80 V20 H32 M0 48 H26"/>
