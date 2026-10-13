@@ -6,7 +6,10 @@
 // On macOS one getattrlistbulk(2) call returns the names, types and
 // attributes of many entries at once, where readdir plus a stat per file costs
 // one system call per file. The call is made without cgo, through libSystem,
-// the way golang.org/x/sys/unix calls libc.
+// the way golang.org/x/sys/unix calls libc. A [Lister] with Names set lists
+// names and types alone by getdirentries64, which reads the directory's
+// records and nothing else; it is libSystem's private __getdirentries64,
+// linked by every macOS binary that imports this package.
 //
 // On Linux the directory is read as raw getdents64 records and each regular
 // file is stat'ed with statx relative to the directory, its name passed in

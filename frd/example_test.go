@@ -197,6 +197,33 @@ func ExampleLister_AppendHandle() {
 	// b.md 4
 }
 
+// Names lists names and types only: no size, no time, no file id, and on
+// macOS no vnode per file, for a walker that needs the tree's shape alone.
+func ExampleLister_names() {
+	root, cleanup := exampleTree()
+	defer cleanup()
+
+	f, err := os.Open(root)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	l := frd.Lister{Names: true}
+	entries, err := l.AppendDir(nil, f)
+	if err != nil {
+		log.Fatal(err)
+	}
+	frd.SortByName(entries)
+	for _, e := range entries {
+		fmt.Println(e.Name, e.Type.IsDir(), e.Size)
+	}
+	// Output:
+	// empty true 0
+	// hello.txt false 0
+	// notes true 0
+}
+
 // Entry is comparable, so whether a file changed since an earlier listing is
 // one comparison against the Entry kept from that listing.
 func ExampleEntry() {

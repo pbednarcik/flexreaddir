@@ -132,7 +132,7 @@ are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg
 |---|---|
 | [`ReadDir`](#readdir) | Lists a directory by name, sorted as `os.ReadDir` sorts. |
 | [`AppendDir`](#appenddir) | Lists an open directory, appending to a slice you reuse. |
-| [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles. |
+| [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles, and names and types only with `Names` set. |
 | [`Entry`](#entry) | One entry: name, type, size, times and file id. |
 | [`Entry.ModTime`](#entrymodtime) | The modification time as a `time.Time`. |
 | [`CompareName`, `SortByName`](#comparename-and-sortbyname) | Byte order by name, the order `os.ReadDir` returns. |
@@ -268,12 +268,15 @@ as you keep it, so a walker keeps one per goroutine.
 Set `Names` to list names and types only: every `Entry` has `Name` and
 `Type`, and `Size`, `ModTimeNanos`, `ChangeTimeNanos` and `FileID` are zero,
 on every platform. On macOS the listing is `getdirentries64`, the call
-`readdir` makes: it reads the directory's records, touches no file's vnode,
-and needs list permission only, so a directory that may be read but not
-searched lists where the full listing fails. Set it before the first call on
-a directory and keep it for that directory; the two macOS calls share the
-descriptor's offset. `getdirentries64` is a private libSystem symbol
-(`__getdirentries64`), which the App Store rejects in a submitted binary; a
+`readdir` makes: it reads the directory's records alone, so it costs the same
+whether or not the files' vnodes are cached, and it needs list permission
+only, so a directory that may be read but not searched lists where the full
+listing fails. Set it before the first call on a directory and keep it for
+that directory; the two macOS calls keep the descriptor's position
+differently, so mixing them on one descriptor repeats or skips entries.
+`getdirentries64` is a private libSystem symbol (`__getdirentries64`), linked
+by every macOS binary that imports this package whether or not it sets
+`Names`; the App Store rejects a submitted binary that imports it. A
 command-line tool or a server is not affected. On this Mac, with the files'
 vnodes not cached, a names-only walk of the Linux kernel source ran 149 ms
 against 268 for the full listing on one goroutine, and 87 against 161 on
@@ -420,7 +423,11 @@ The package calls libSystem the way `golang.org/x/sys/unix` does: a
 for each libSystem function, and the runtime's `syscall.syscall6`, which Go keeps reachable by linkname
 for exactly this kind of package. If a future Go release closed that
 door, the package would stop building on macOS rather than misbehave, and
-`golang.org/x/sys` would be in the same position.
+`golang.org/x/sys` would be in the same position. One of the three libSystem
+functions, `__getdirentries64` for `Lister.Names`, is private: Apple's own
+`readdir` is built on it, but the App Store rejects a submitted binary that
+imports it, and the import is made by every macOS binary that uses this
+package, not only by one that sets `Names`.
 
 The buffers the kernel fills, macOS attribute and `getdirentries64` records,
 Linux `getdents64` records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,

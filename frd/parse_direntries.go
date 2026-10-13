@@ -16,8 +16,8 @@ const direntryHeader = 8 + 8 + 2 + 2 + 1
 // dtWhiteout is DT_WHT, a union mount's deleted name.
 const dtWhiteout = 14
 
-// namesOp names the names-only listing call in its errors; the directory's
-// name is joined to them under the bulk call's otherwise.
+// namesOp is the Op of the names-only listing's errors, so that they do not
+// take listOp, the bulk call's name, when the directory's name is joined.
 const namesOp = "getdirentries64"
 
 // parseDirentries appends an Entry for each getdirentries64 record in buf,
@@ -50,9 +50,10 @@ func parseDirentries(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (
 	return dst, err
 }
 
-// direntrySizes counts the records in buf and the bytes of their names from
-// the lengths the records claim, checking nothing: a wrong count costs an
-// allocation, never a wrong name, and a name counts at most its record.
+// direntrySizes counts the records in buf that eachDirentry visits and the
+// bytes of their names from the lengths the records claim, checking nothing:
+// a wrong count costs an allocation, never a wrong name, and a name counts at
+// most its record.
 func direntrySizes(buf []byte) (entries, nameBytes int) {
 	le := binary.LittleEndian
 	for len(buf) >= direntryHeader {
@@ -60,9 +61,15 @@ func direntrySizes(buf []byte) (entries, nameBytes int) {
 		if length <= direntryHeader || length > len(buf) {
 			break
 		}
-		entries++
-		nameBytes += min(int(le.Uint16(buf[18:])), length-direntryHeader)
+		rec := buf[:length]
 		buf = buf[length:]
+		namlen := min(int(le.Uint16(rec[18:])), length-direntryHeader)
+		name := rec[direntryHeader : direntryHeader+namlen]
+		if le.Uint64(rec) == 0 || len(name) > 0 && name[0] == '.' && (len(name) == 1 || len(name) == 2 && name[1] == '.') {
+			continue
+		}
+		entries++
+		nameBytes += namlen
 	}
 	return entries, nameBytes
 }

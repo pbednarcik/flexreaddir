@@ -53,6 +53,53 @@ func TestParseRecordsIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 	}
 }
 
+func hundredDirentries() []byte {
+	var parts [][]byte
+	for _, name := range hundredFiles() {
+		parts = append(parts, direntry(name, dtRegular))
+	}
+	return slices.Concat(parts...)
+}
+
+func TestParseDirentriesAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
+	buf := hundredDirentries()
+	dst := make([]Entry, 0, 100)
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseDirentries(dst[:0], buf, statedType); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs > 1 {
+		t.Fatalf("parsing 100 direntries allocated %v times, want 1", allocs)
+	}
+}
+
+func TestParseDirentriesIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
+	buf := hundredDirentries()
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseDirentries(nil, buf, statedType); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs > 2 {
+		t.Fatalf("parsing 100 direntries into nil allocated %v times, want 2", allocs)
+	}
+}
+
+// An empty directory's buffer holds "." and "..", which the kernel returns
+// and the listing skips: nothing to allocate for.
+func TestParseDirentriesOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
+	buf := slices.Concat(direntry(".", dtDir), direntry("..", dtDir))
+	allocs := testing.AllocsPerRun(20, func() {
+		if _, err := parseDirentries(nil, buf, statedType); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("parsing an empty directory allocated %v times, want 0", allocs)
+	}
+}
+
 func hundredDirents() []byte {
 	var parts [][]byte
 	for _, name := range hundredFiles() {

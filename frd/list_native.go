@@ -19,11 +19,18 @@ const bufferBytes = 64 << 10
 type Lister struct {
 	// Names, when set, lists names and types only: every Entry carries Name
 	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
-	// On macOS it lists by getdirentries64, which is cheaper than
-	// getattrlistbulk when the files' vnodes are not cached and needs list
-	// permission only. Set it before the first call on a directory and keep
-	// it for that directory: the two macOS calls share the descriptor's
-	// offset.
+	// On macOS it lists by getdirentries64, which reads the directory's
+	// records alone, so it costs the same whether or not the files' vnodes
+	// are cached, and needs list permission only. Set it before the first
+	// call on a directory and keep it for that directory: the two macOS
+	// calls keep the descriptor's position differently, so mixing them on
+	// one descriptor repeats or skips entries.
+	//
+	// getdirentries64 is libSystem's private __getdirentries64, the call
+	// readdir is built on, and it is linked by every macOS binary that
+	// imports this package, whether or not Names is set; the App Store
+	// rejects a submitted binary that imports it. A command-line tool or a
+	// server is not affected.
 	Names bool
 
 	buf []byte // what the kernel fills, allocated on first use
@@ -73,7 +80,8 @@ func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 
 // pathError names the directory in err. listOp names the platform's listing
 // call; readAll returns an *os.PathError of its own for an entry that failed,
-// whose path, relative to the directory, is joined to name.
+// whose path, relative to the directory, is joined to name, and the macOS
+// names-only listing returns one with no path under its own call's name.
 func pathError(err error, name string) error {
 	if err == nil {
 		return nil
