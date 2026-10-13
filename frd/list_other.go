@@ -9,13 +9,17 @@ import (
 )
 
 func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
+	return appendDirNames(dst, dir, false)
+}
+
+func appendDirNames(dst []Entry, dir *os.File, names bool) ([]Entry, error) {
 	if dir == nil {
 		return dst, &os.PathError{Op: "readdir", Err: os.ErrInvalid}
 	}
 	read, readErr := dir.ReadDir(-1)
 	for _, de := range read {
 		e := Entry{Name: de.Name(), Type: de.Type()}
-		if e.Type.IsRegular() {
+		if !names && e.Type.IsRegular() {
 			info, err := de.Info()
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
@@ -39,10 +43,14 @@ func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 //
 // The zero Lister is ready to use. A Lister must not be used by two
 // goroutines at once, nor copied after its first use.
-type Lister struct{}
+type Lister struct {
+	// Names, when set, lists names and types only: every Entry carries Name
+	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
+	Names bool
+}
 
 func (l *Lister) appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
-	return appendDir(dst, dir)
+	return appendDirNames(dst, dir, l.Names)
 }
 
 // appendHandle has no os.File to read through: wrapping fd in one would hand

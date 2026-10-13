@@ -143,7 +143,7 @@ func stated(_ []byte, e *Entry) (bool, error) { e.Size = 7; return true, nil }
 
 func TestParseDirentsStatsOnlyWhatTheRecordTypeDoesNotSettle(t *testing.T) {
 	buf := slices.Concat(dirent("sub", dtDir), dirent("a.go", dtRegular), dirent("odd", dtUnknown))
-	got, err := parseDirents(nil, buf, stated)
+	got, err := parseDirents(nil, buf, stated, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestParseDirentsLeavesOutANameRemovedBeforeItsStat(t *testing.T) {
 			return false, nil
 		}
 		return stated(name, e)
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +179,37 @@ func TestParseDirentsStopsAtAStatError(t *testing.T) {
 			return false, denied
 		}
 		return stated(name, e)
-	})
+	}, false)
 	if !errors.Is(err, denied) || !slices.Equal(got, []Entry{{Name: "a.go", Size: 7}}) {
 		t.Fatalf("parseDirents = %+v, %v; want a.go and the stat error", got, err)
+	}
+}
+
+func TestParseDirentsUnderNamesStatsOnlyTheUnknown(t *testing.T) {
+	buf := slices.Concat(dirent("sub", dtDir), dirent("a.go", dtRegular), dirent("odd", dtUnknown))
+	got, err := parseDirents(nil, buf, func(name []byte, e *Entry) (bool, error) {
+		if string(name) != "odd" {
+			t.Errorf("%q was stat'ed under Names", name)
+		}
+		e.Type = fs.ModeSymlink
+		return true, nil
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{{Name: "sub", Type: fs.ModeDir}, {Name: "a.go"}, {Name: "odd", Type: fs.ModeSymlink}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("parseDirents = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseDirentsUnderNamesLeavesOutAnUnknownNameRemovedBeforeItsStat(t *testing.T) {
+	buf := slices.Concat(dirent("gone", dtUnknown), dirent("kept.go", dtRegular))
+	got, err := parseDirents(nil, buf, func([]byte, *Entry) (bool, error) { return false, nil }, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Entry{{Name: "kept.go"}}; !slices.Equal(got, want) {
+		t.Fatalf("parseDirents = %+v, want %+v", got, want)
 	}
 }

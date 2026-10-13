@@ -109,7 +109,7 @@ func BenchmarkParseFullInfoReal(b *testing.B) {
 				dst = dst[:0]
 				for _, buf := range bufs {
 					var err error
-					if dst, err = parseFullInfo(dst, buf, idExtdDirInfo); err != nil {
+					if dst, err = parseFullInfo(dst, buf, idExtdDirInfo, false); err != nil {
 						b.Fatal(err)
 					}
 				}

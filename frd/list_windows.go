@@ -33,7 +33,7 @@ func layoutOf(class uint32) layout {
 // may switch: after it, the handle's position has moved. ERROR_FILE_NOT_FOUND
 // on the first call is an empty root directory (MS-FSA 2.1.5.6.3), not a
 // failure. buf must be 8-byte aligned.
-func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	class, l := listClass, layoutOf(listClass)
 	for first := true; ; first = false {
 		var err error
@@ -52,7 +52,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 		if err != nil {
 			return dst, err
 		}
-		if dst, err = parseFullInfo(dst, buf, l); err != nil {
+		if dst, err = parseFullInfo(dst, buf, l, names); err != nil {
 			return dst, err
 		}
 	}

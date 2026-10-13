@@ -15,11 +15,15 @@ import (
 
 const listOp = "getdents64"
 
-func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	fd := int(h)
 	var stx unix.Statx_t
+	mask := uint32(statxMask)
+	if names {
+		mask = unix.STATX_TYPE
+	}
 	stat := func(name []byte, e *Entry) (bool, error) {
-		err := statx(fd, name, &stx)
+		err := statx(fd, name, &stx, mask)
 		if errors.Is(err, syscall.ENOENT) {
 			return false, nil
 		}
@@ -27,7 +31,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 			return false, &os.PathError{Op: "statx", Path: string(name), Err: err}
 		}
 		e.Type = statMode(uint32(stx.Mode))
-		if e.Type.IsRegular() {
+		if !names && e.Type.IsRegular() {
 			e.Size = int64(stx.Size)
 			e.ModTimeNanos = stx.Mtime.Sec*1e9 + int64(stx.Mtime.Nsec)
 			e.ChangeTimeNanos = stx.Ctime.Sec*1e9 + int64(stx.Ctime.Nsec)
@@ -43,7 +47,7 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 		if err != nil || n == 0 {
 			return dst, err
 		}
-		if dst, err = parseDirents(dst, buf[:n], stat); err != nil {
+		if dst, err = parseDirents(dst, buf[:n], stat, names); err != nil {
 			return dst, err
 		}
 	}
@@ -62,11 +66,12 @@ const statxFlags = unix.AT_SYMLINK_NOFOLLOW | unix.AT_NO_AUTOMOUNT
 var noStatx atomic.Bool
 
 // statx stats name relative to fd, passing it to the kernel where it lies in
-// the getdents buffer instead of copying it the way unix.Fstatat does.
-func statx(fd int, name []byte, stx *unix.Statx_t) error {
+// the getdents buffer instead of copying it the way unix.Fstatat does, and
+// asks for the fields in mask.
+func statx(fd int, name []byte, stx *unix.Statx_t, mask uint32) error {
 	for !noStatx.Load() {
 		_, _, errno := unix.Syscall6(unix.SYS_STATX, uintptr(fd), uintptr(unsafe.Pointer(&name[0])),
-			statxFlags, statxMask, uintptr(unsafe.Pointer(stx)), 0)
+			statxFlags, uintptr(mask), uintptr(unsafe.Pointer(stx)), 0)
 		runtime.KeepAlive(name)
 		runtime.KeepAlive(stx)
 		switch errno {

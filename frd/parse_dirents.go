@@ -28,8 +28,9 @@ const direntHeader = 8 + 8 + 2 + 1
 // type settles every entry but a regular file or an unknown type, which stat
 // describes from the name as it lies in buf, NUL after it; stat reports false
 // for a name removed since the read. stat fills the Entry where it lies in
-// dst, so no Entry is copied on the way.
-func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (bool, error)) ([]Entry, error) {
+// dst, so no Entry is copied on the way. Under namesOnly a regular file is
+// not stat'ed and stat fills Type only.
+func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (bool, error), namesOnly bool) ([]Entry, error) {
 	nameBytes, entries := 0, 0
 	_ = eachDirent(buf, func(name []byte, _ byte) error {
 		nameBytes += len(name)
@@ -43,7 +44,7 @@ func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (boo
 		mode, known := direntMode(dtype)
 		dst = append(dst, Entry{Type: mode})
 		e := &dst[len(dst)-1]
-		if !known || mode.IsRegular() {
+		if !known || !namesOnly && mode.IsRegular() {
 			if found, err := stat(name, e); !found || err != nil {
 				dst = dst[:len(dst)-1]
 				return err

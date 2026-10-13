@@ -17,6 +17,15 @@ const bufferBytes = 64 << 10
 // The zero Lister is ready to use. A Lister must not be used by two
 // goroutines at once, nor copied after its first use.
 type Lister struct {
+	// Names, when set, lists names and types only: every Entry carries Name
+	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
+	// On macOS it lists by getdirentries64 instead of getattrlistbulk, which
+	// is cheaper when the files' vnodes are not cached and needs list
+	// permission only. Set it before the first call on a directory and keep
+	// it for that directory: the two macOS calls share the descriptor's
+	// offset.
+	Names bool
+
 	buf []byte // what the kernel fills, allocated on first use
 }
 
@@ -59,7 +68,7 @@ func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 		// requires it (ERROR_NOACCESS otherwise).
 		l.buf = make([]byte, bufferBytes)
 	}
-	return readAll(dst, fd, l.buf)
+	return readAll(dst, fd, l.buf, l.Names)
 }
 
 // pathError names the directory in err. listOp names the platform's listing

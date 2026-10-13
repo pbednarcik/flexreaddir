@@ -53,6 +53,24 @@ func BenchmarkAppendDir(b *testing.B) {
 					}
 				}
 			})
+			// The same walker asking for names and types only.
+			b.Run("frd-names", func(b *testing.B) {
+				l := Lister{Names: true}
+				var entries []Entry
+				b.ReportAllocs()
+				for b.Loop() {
+					fd := openRaw(b, dir)
+					var err error
+					entries, err = l.AppendHandle(entries[:0], fd, dir)
+					mustCloseRaw(b, fd)
+					if errors.Is(err, errors.ErrUnsupported) {
+						b.Skip(err)
+					}
+					if err != nil || len(entries) != files {
+						b.Fatalf("%d entries, %v; want %d", len(entries), err, files)
+					}
+				}
+			})
 			b.Run("readdir-info", func(b *testing.B) {
 				benchListing(b, dir, files, func(f *os.File) (int, error) {
 					read, err := f.ReadDir(-1)
@@ -120,7 +138,7 @@ func BenchmarkParseDirents(b *testing.B) {
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := parseDirents(dst[:0], buf, stated); err != nil {
+		if _, err := parseDirents(dst[:0], buf, stated, false); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -139,7 +157,7 @@ func BenchmarkParseFullInfo(b *testing.B) {
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo); err != nil {
+		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo, false); err != nil {
 			b.Fatal(err)
 		}
 	}

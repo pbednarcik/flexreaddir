@@ -1,11 +1,13 @@
 package frd
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -133,4 +135,119 @@ func TestConcurrentListingsAgree(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// namesOnly is what a Names listing must report for e: its name and type.
+func namesOnly(e Entry) Entry { return Entry{Name: e.Name, Type: e.Type} }
+
+// namesOf is readDir's map with every entry cut to its name and type.
+func namesOf(t *testing.T, dir string) map[string]Entry {
+	t.Helper()
+	want := map[string]Entry{}
+	for name, e := range readDir(t, dir) {
+		want[name] = namesOnly(e)
+	}
+	return want
+}
+
+func TestANamesListingCarriesNamesAndTypesOnly(t *testing.T) {
+	dir := listerTree(t)
+	if full := readDir(t, dir); full["f00.go"].Size == 0 {
+		t.Fatal("the full listing has no size to leave out")
+	}
+	want := namesOf(t, dir)
+	f, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	l := Lister{Names: true}
+	entries, err := l.AppendDir(nil, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := byName(t, entries); !maps.Equal(got, want) {
+		t.Fatalf("Lister{Names: true}.AppendDir = %v, want %v", got, want)
+	}
+	fd := openRaw(t, dir)
+	defer mustCloseRaw(t, fd)
+	entries, err = l.AppendHandle(nil, fd, dir)
+	if errors.Is(err, errors.ErrUnsupported) {
+		return // no native listing on this platform
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := byName(t, entries); !maps.Equal(got, want) {
+		t.Fatalf("Lister{Names: true}.AppendHandle = %v, want %v", got, want)
+	}
+}
+
+func TestANamesListingReadsADirectoryLargerThanOneBuffer(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 3000 {
+		if err := os.WriteFile(filepath.Join(dir, "f"+strconv.Itoa(i)+".go"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	l := Lister{Names: true}
+	entries, err := l.AppendDir(nil, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byName(t, entries)
+	if len(got) != 3000 {
+		t.Fatalf("listed %d names, want 3000", len(got))
+	}
+	for name, e := range got {
+		if e != (Entry{Name: name}) {
+			t.Fatalf("%s = %+v, want a regular file with its name only", name, e)
+		}
+	}
+}
+
+func TestANamesListingOfAnEmptyDirectoryListsNothing(t *testing.T) {
+	f, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	l := Lister{Names: true}
+	entries, err := l.AppendDir(nil, f)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("Lister{Names: true}.AppendDir = %v, %v; want nothing", entries, err)
+	}
+}
+
+// A Lister may list one directory by names and the next in full.
+func TestNamesMaySwitchBetweenDirectories(t *testing.T) {
+	short, full := listerTree(t), listerTree(t)
+	var l Lister
+	for i, c := range []struct {
+		dir   string
+		names bool
+	}{{short, true}, {full, false}, {short, true}} {
+		want := readDir(t, c.dir)
+		if c.names {
+			want = namesOf(t, c.dir)
+		}
+		f, err := os.Open(c.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.Names = c.names
+		entries, err := l.AppendDir(nil, f)
+		mustClose(t, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := byName(t, entries); !maps.Equal(got, want) {
+			t.Fatalf("listing %d: got %v, want %v", i, got, want)
+		}
+	}
 }

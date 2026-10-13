@@ -40,14 +40,15 @@ const windowsEpoch = 116444736000000000
 // parseFullInfo appends an Entry for each record of layout l chained in buf,
 // with one allocation for their names (more only if non-ASCII names outgrow
 // it) and at most one to grow dst. On a malformed record it returns the
-// entries before it with the error.
+// entries before it with the error. Under names only Name and Type are
+// filled.
 //
 // Each name is decoded straight into the block and its string sliced from
 // there, with no copy. A name's bytes are never written again once it is
 // handed out: later names are appended past it, asciiRun's overreach lands
 // only past the block's length, and a block that must grow is copied,
 // leaving earlier names on the old array.
-func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
+func parseFullInfo(dst []Entry, buf []byte, l layout, names bool) ([]Entry, error) {
 	units, entries := 0, 0
 	_ = eachFullInfo(buf, l, func(r fullInfo) error {
 		units += len(r.name) / 2
@@ -70,7 +71,7 @@ func parseFullInfo(dst []Entry, buf []byte, l layout) ([]Entry, error) {
 		}
 		name := unsafe.String(unsafe.SliceData(block[start:]), len(block)-start)
 		e := Entry{Name: name, Type: attrMode(r.attrs, r.tag)}
-		if e.Type.IsRegular() {
+		if !names && e.Type.IsRegular() {
 			e.Size, e.ModTimeNanos, e.FileID = r.size, (r.writeTime-windowsEpoch)*100, r.fileID
 			if r.changeTime != 0 { // zero: a filesystem that keeps no change time
 				e.ChangeTimeNanos = (r.changeTime - windowsEpoch) * 100

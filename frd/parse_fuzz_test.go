@@ -39,7 +39,7 @@ func FuzzDirents(f *testing.F) {
 				t.Fatalf("%q reached stat without its NUL after it", name)
 			}
 			return true, nil
-		})
+		}, false)
 		for _, e := range got {
 			if e.Name == "" || e.Name == "." || e.Name == ".." || strings.IndexByte(e.Name, 0) >= 0 {
 				t.Fatalf("listed the name %q", e.Name)
@@ -58,7 +58,7 @@ func FuzzFullInfo(f *testing.F) {
 		if extd {
 			l = idExtdDirInfo
 		}
-		got, _ := parseFullInfo(nil, buf, l)
+		got, _ := parseFullInfo(nil, buf, l, false)
 		for _, e := range got {
 			if e.Name == "" || e.Name == "." || e.Name == ".." || strings.IndexByte(e.Name, 0) >= 0 {
 				t.Fatalf("listed the name %q", e.Name)

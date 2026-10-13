@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -143,4 +144,28 @@ func idsPersist(t *testing.T, dir string) bool {
 		return false
 	}
 	return true
+}
+
+// getdirentries64 needs list permission only, so a Names listing of a
+// directory that may be read but not searched succeeds where the full one
+// fails.
+func TestADirectoryThatCannotBeSearchedListsItsNames(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refuseSearch(t, dir)
+	f, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	l := Lister{Names: true}
+	entries, err := l.AppendDir(nil, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Entry{{Name: "a.go"}}; !slices.Equal(entries, want) {
+		t.Fatalf("Lister{Names: true}.AppendDir = %+v, want %+v", entries, want)
+	}
 }

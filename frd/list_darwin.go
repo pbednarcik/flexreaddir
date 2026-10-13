@@ -4,10 +4,13 @@ package frd
 
 import (
 	"errors"
+	"os"
 	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // attrlist is struct attrlist from <sys/attr.h>.
@@ -29,8 +32,11 @@ var requested = attrlist{
 
 const listOp = bulkOp
 
-func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	fd := int(h)
+	if names {
+		return readNames(dst, fd, buf)
+	}
 	persistent := func(fsid uint64) bool { return persistentIDs(fd, fsid) }
 	for {
 		n, err := getattrlistbulk(fd, &requested, buf)
@@ -41,6 +47,48 @@ func readAll(dst []Entry, h uintptr, buf []byte) ([]Entry, error) {
 			return dst, err
 		}
 		if dst, err = parseRecords(dst, buf, n, persistent); err != nil {
+			return dst, err
+		}
+	}
+}
+
+// namesOp names the names-only listing call in its errors.
+const namesOp = "getdirentries64"
+
+// readNames lists fd by getdirentries64, the call readdir makes, which reads
+// the directory's own records and creates no vnode for the files it names. A
+// DT_UNKNOWN record is typed by fstatat of the name, never following a link.
+func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
+	var st unix.Stat_t
+	stat := func(name []byte, e *Entry) (bool, error) {
+		var err error
+		for {
+			if err = unix.Fstatat(fd, string(name), &st, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, syscall.EINTR) {
+				break
+			}
+		}
+		if errors.Is(err, syscall.ENOENT) {
+			return false, nil
+		}
+		if err != nil {
+			return false, &os.PathError{Op: "fstatat", Path: string(name), Err: err}
+		}
+		e.Type = statMode(uint32(st.Mode))
+		return true, nil
+	}
+	var pos int64
+	for {
+		n, err := getdirentries64(fd, buf, &pos)
+		if errors.Is(err, syscall.EINTR) {
+			continue
+		}
+		if err != nil {
+			return dst, &os.PathError{Op: namesOp, Err: err}
+		}
+		if n == 0 {
+			return dst, nil
+		}
+		if dst, err = parseDirentries(dst, buf[:n], stat); err != nil {
 			return dst, err
 		}
 	}
@@ -132,6 +180,24 @@ func getattrlistbulk(fd int, al *attrlist, buf []byte) (int, error) {
 //
 //go:linkname syscall_syscall6 syscall.syscall6
 func syscall_syscall6(fn, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err syscall.Errno)
+
+// getdirentries64 is libSystem's __getdirentries64, the private entry point
+// readdir is built on: it fills buf from the descriptor's offset and writes
+// the offset it started from to pos, which must not be nil.
+func getdirentries64(fd int, buf []byte, pos *int64) (int, error) {
+	r, _, errno := syscall_syscall6(libc___getdirentries64_trampoline_addr,
+		uintptr(fd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), uintptr(unsafe.Pointer(pos)), 0, 0)
+	runtime.KeepAlive(buf)
+	runtime.KeepAlive(pos)
+	if errno != 0 {
+		return 0, errno
+	}
+	return int(int64(r)), nil
+}
+
+var libc___getdirentries64_trampoline_addr uintptr
+
+//go:cgo_import_dynamic libc___getdirentries64 __getdirentries64 "/usr/lib/libSystem.B.dylib"
 
 var libc_getattrlistbulk_trampoline_addr uintptr
 

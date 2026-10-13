@@ -85,7 +85,7 @@ func TestAFullInfoRegularFileCarriesItsSizeTimesAndID(t *testing.T) {
 			finfo{name: "a.go", attrs: 0x20, size: 10, writeTime: unixFiletime(1700000000, 123456700), changeTime: unixFiletime(1700000001, 987654300), lo: 0x0001000000000ABC},
 			finfo{name: "b.go", attrs: 0x20, size: 1, writeTime: unixFiletime(1, 0), lo: 7, hi: 1}, // no change time kept; a 128-bit id: unknown
 			finfo{name: "d", attrs: attrDirectory, writeTime: unixFiletime(1, 0), changeTime: unixFiletime(2, 0), lo: 9},
-		), lc.l)
+		), lc.l, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +126,7 @@ func TestFullInfoTypesAreTheStandardLibrarys(t *testing.T) {
 	}
 	for _, lc := range layouts {
 		for _, c := range cases {
-			got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{name: "x", attrs: c.attrs, tag: c.tag, size: 1, writeTime: unixFiletime(1, 0)}), lc.l)
+			got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{name: "x", attrs: c.attrs, tag: c.tag, size: 1, writeTime: unixFiletime(1, 0)}), lc.l, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +142,7 @@ func TestFullInfoTypesAreTheStandardLibrarys(t *testing.T) {
 
 func TestFullInfoSkipsDotAndDotDot(t *testing.T) {
 	for _, lc := range layouts {
-		got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{name: "."}, finfo{name: ".."}, finfo{name: "..."}, finfo{name: ".a"}), lc.l)
+		got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{name: "."}, finfo{name: ".."}, finfo{name: "..."}, finfo{name: ".a"}), lc.l, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestAMalformedFullInfoBufferIsErrMalformedWithTheEntriesBeforeIt(t *testing
 			{"next inside its own record", set(0, 0, 8)},
 		}
 		for _, c := range cases {
-			got, err := parseFullInfo(nil, c.buf, lc.l)
+			got, err := parseFullInfo(nil, c.buf, lc.l, false)
 			if !errors.Is(err, ErrMalformed) {
 				t.Errorf("%s, %s: err = %v, want ErrMalformed", lc.name, c.name, err)
 			}
@@ -206,7 +206,7 @@ func TestFullInfoNamesAreDecodedFromUTF16(t *testing.T) {
 	}
 	for _, lc := range layouts {
 		for _, c := range cases {
-			got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{units: c.units}), lc.l)
+			got, err := parseFullInfo(nil, finfosIn(lc.l, finfo{units: c.units}), lc.l, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -236,7 +236,7 @@ func TestFullInfoNamesStayWholeWhenTheirBlockGrows(t *testing.T) {
 		rs, want = append(rs, finfo{name: n}), append(want, n)
 	}
 	for _, lc := range layouts {
-		got, err := parseFullInfo(nil, finfosIn(lc.l, rs...), lc.l)
+		got, err := parseFullInfo(nil, finfosIn(lc.l, rs...), lc.l, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,6 +247,21 @@ func TestFullInfoNamesStayWholeWhenTheirBlockGrows(t *testing.T) {
 			if e.Name != want[i] {
 				t.Errorf("%s: entry %d is %q, want %q", lc.name, i, e.Name, want[i])
 			}
+		}
+	}
+}
+
+func TestAFullInfoNamesListingCarriesNamesAndTypesOnly(t *testing.T) {
+	for _, lc := range layouts {
+		got, err := parseFullInfo(nil, finfosIn(lc.l,
+			finfo{name: "a.go", attrs: 0x20, size: 10, writeTime: unixFiletime(1700000000, 0), changeTime: unixFiletime(1, 0), lo: 5},
+			finfo{name: "d", attrs: attrDirectory, writeTime: unixFiletime(1, 0)},
+		), lc.l, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []Entry{{Name: "a.go"}, {Name: "d", Type: fs.ModeDir}}; !slices.Equal(got, want) {
+			t.Fatalf("%s: got %+v, want %+v", lc.name, got, want)
 		}
 	}
 }

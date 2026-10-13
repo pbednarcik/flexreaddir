@@ -100,7 +100,8 @@ func AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDir(dst, dir)
 }
 
-// AppendDir is the function [AppendDir] with the Lister's buffer.
+// AppendDir is the function [AppendDir] with the Lister's buffer, and names
+// and types only when [Lister.Names] is set.
 func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return l.appendDir(dst, dir)
 }
@@ -110,7 +111,8 @@ func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 // returns, so a walker that opens directories itself need not wrap each in
 // an [os.File]. The listing starts at the handle's current position, so the
 // caution under AppendDir applies to a handle taken from an os.File. name is
-// used only in errors, as [os.NewFile] uses it.
+// used only in errors, as [os.NewFile] uses it. It honours [Lister.Names] as
+// AppendDir does.
 //
 // AppendHandle does not close the handle or change its mode, and the caller
 // must not close it during the call. A handle taken from os.File.Fd needs

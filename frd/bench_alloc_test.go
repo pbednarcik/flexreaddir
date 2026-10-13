@@ -65,7 +65,7 @@ func TestParseDirentsAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 	buf := hundredDirents()
 	dst := make([]Entry, 0, 100)
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseDirents(dst[:0], buf, stated); err != nil {
+		if _, err := parseDirents(dst[:0], buf, stated, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -77,7 +77,7 @@ func TestParseDirentsAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 func TestParseDirentsIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 	buf := hundredDirents()
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseDirents(nil, buf, stated); err != nil {
+		if _, err := parseDirents(nil, buf, stated, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -98,7 +98,7 @@ func TestParseFullInfoAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 	buf := hundredFullInfos()
 	dst := make([]Entry, 0, 100)
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo); err != nil {
+		if _, err := parseFullInfo(dst[:0], buf, idExtdDirInfo, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -110,7 +110,7 @@ func TestParseFullInfoAllocatesOnceForAllTheNamesInABuffer(t *testing.T) {
 func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) {
 	buf := hundredFullInfos()
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseFullInfo(nil, buf, idExtdDirInfo); err != nil {
+		if _, err := parseFullInfo(nil, buf, idExtdDirInfo, false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -124,7 +124,7 @@ func TestParseFullInfoIntoANilSliceAllocatesOnceMoreForTheEntries(t *testing.T) 
 func TestParseFullInfoOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
 	buf := finfos(finfo{name: "."}, finfo{name: ".."})
 	allocs := testing.AllocsPerRun(20, func() {
-		if _, err := parseFullInfo(nil, buf, idExtdDirInfo); err != nil {
+		if _, err := parseFullInfo(nil, buf, idExtdDirInfo, false); err != nil {
 			t.Fatal(err)
 		}
 	})
