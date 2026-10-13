@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -200,5 +201,15 @@ func TestParseDirentriesAppendsToWhatItIsGiven(t *testing.T) {
 	}
 	if want := []Entry{{Name: "first"}, {Name: "second", Type: fs.ModeDir}}; !slices.Equal(got, want) {
 		t.Fatalf("parseDirentries = %+v, want %+v", got, want)
+	}
+}
+
+// A malformed buffer names the call that filled it, not the bulk call the
+// directory's name is joined under.
+func TestAMalformedDirentryBufferNamesItsCall(t *testing.T) {
+	_, err := parseDirentries(nil, direntry("a.go", dtRegular)[:12], statedType)
+	pe, ok := errors.AsType[*os.PathError](err)
+	if !ok || pe.Op != namesOp || pe.Path != "" || !errors.Is(err, ErrMalformed) {
+		t.Fatalf("parseDirentries error = %v, want a %s *os.PathError with no path wrapping ErrMalformed", err, namesOp)
 	}
 }

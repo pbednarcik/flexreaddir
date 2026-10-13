@@ -282,7 +282,7 @@ against 57 ([the measurement](docs/notes/evidence/2026-10-13-names-only-listing.
 
 ```go
 l := frd.Lister{Names: true}
-entries, err := l.AppendDir(nil, dir) // names and types, nothing stat'ed
+entries, err := l.AppendDir(nil, dir) // names and types, no stat per file
 ```
 
 `AppendHandle` is for a walker that opens directories itself. It lists a raw

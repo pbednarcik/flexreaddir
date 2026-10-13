@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io/fs"
+	"os"
 	"slices"
 )
 
@@ -15,11 +16,16 @@ const direntryHeader = 8 + 8 + 2 + 2 + 1
 // dtWhiteout is DT_WHT, a union mount's deleted name.
 const dtWhiteout = 14
 
+// namesOp names the names-only listing call in its errors; the directory's
+// name is joined to them under the bulk call's otherwise.
+const namesOp = "getdirentries64"
+
 // parseDirentries appends an Entry for each getdirentries64 record in buf,
 // with one allocation for their names and at most one to grow dst. The
 // record's type settles every entry but DT_UNKNOWN, which stat types from the
 // name as it lies in buf, NUL after it; stat reports false for a name removed
-// since the read. Nothing but Name and Type is filled.
+// since the read. Nothing but Name and Type is filled. A malformed record is
+// an *os.PathError naming the call, wrapping ErrMalformed, with no path.
 func parseDirentries(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (bool, error)) ([]Entry, error) {
 	entries, nameBytes := direntrySizes(buf)
 	dst = slices.Grow(dst, entries)
@@ -38,6 +44,9 @@ func parseDirentries(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (
 		e.Name = names.add(name)
 		return nil
 	})
+	if err == ErrMalformed {
+		err = &os.PathError{Op: namesOp, Err: err}
+	}
 	return dst, err
 }
 

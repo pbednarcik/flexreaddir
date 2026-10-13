@@ -10,8 +10,8 @@ import (
 // Entry describes one name in a directory listing.
 //
 // Size, ModTimeNanos, ChangeTimeNanos and FileID describe regular files only;
-// for every other type they are zero on every platform, so an Entry compares
-// the same everywhere.
+// for every other type, and for every entry under [Lister.Names], they are
+// zero on every platform, so an Entry compares the same everywhere.
 type Entry struct {
 	// Name is the entry's name within its directory, without a path. The
 	// names from one read share one allocation, so a Name kept long after

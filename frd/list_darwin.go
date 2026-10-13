@@ -52,9 +52,6 @@ func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	}
 }
 
-// namesOp names the names-only listing call in its errors.
-const namesOp = "getdirentries64"
-
 // readNames lists fd by getdirentries64, the call readdir makes, which reads
 // the directory's own records and creates no vnode for the files it names. A
 // DT_UNKNOWN record is typed by fstatat of the name, never following a link.

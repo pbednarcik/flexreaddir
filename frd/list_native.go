@@ -19,8 +19,8 @@ const bufferBytes = 64 << 10
 type Lister struct {
 	// Names, when set, lists names and types only: every Entry carries Name
 	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
-	// On macOS it lists by getdirentries64 instead of getattrlistbulk, which
-	// is cheaper when the files' vnodes are not cached and needs list
+	// On macOS it lists by getdirentries64, which is cheaper than
+	// getattrlistbulk when the files' vnodes are not cached and needs list
 	// permission only. Set it before the first call on a directory and keep
 	// it for that directory: the two macOS calls share the descriptor's
 	// offset.
