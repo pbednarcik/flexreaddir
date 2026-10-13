@@ -19,6 +19,9 @@
   times and file ids, straight from the listing.
 - **Each platform's bulk call.** `getattrlistbulk` on macOS, `getdents64` with
   `statx` on Linux, `FILE_ID_EXTD_DIR_INFO` on Windows.
+- **Names and types alone, when that is all you need.** `Lister.Names` lists
+  by `getdirentries64` on macOS, which reads the directory's records and
+  leaves the files' vnodes alone, and skips the `statx` per file on Linux.
 - **Profiled down to the kernel.** FlexReadDir's own code is about 4% of a
   listing on macOS, 5% on Linux and under 13% on Windows; the rest is the
   operating system's time.
@@ -232,7 +235,10 @@ runtime's kqueue; `os.ReadDir` follows each with `lstat` instead.
 ### `Lister`
 
 ```go
-type Lister struct{ /* the buffer the kernel fills */ }
+type Lister struct {
+	Names bool // list names and types only
+	/* the buffer the kernel fills */
+}
 
 func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error)
 func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error)
@@ -258,6 +264,26 @@ as you keep it, so a walker keeps one per goroutine.
   use.
 - One directory is listed by one goroutine at a time: two calls on one
   `os.File` share its offset and split its entries between them.
+
+Set `Names` to list names and types only: every `Entry` has `Name` and
+`Type`, and `Size`, `ModTimeNanos`, `ChangeTimeNanos` and `FileID` are zero,
+on every platform. On macOS the listing is `getdirentries64`, the call
+`readdir` makes: it reads the directory's records, touches no file's vnode,
+and needs list permission only, so a directory that may be read but not
+searched lists where the full listing fails. Set it before the first call on
+a directory and keep it for that directory; the two macOS calls share the
+descriptor's offset. `getdirentries64` is a private libSystem symbol
+(`__getdirentries64`), which the App Store rejects in a submitted binary; a
+command-line tool or a server is not affected. On this Mac, with the files'
+vnodes not cached, a names-only walk of the Linux kernel source ran 149 ms
+against 268 for the full listing on one goroutine, and 87 against 161 on
+eighteen; on Linux, where the full listing is a `statx` per file, 19 ms
+against 57 ([the measurement](docs/notes/evidence/2026-10-13-names-only-listing.md)).
+
+```go
+l := frd.Lister{Names: true}
+entries, err := l.AppendDir(nil, dir) // names and types, nothing stat'ed
+```
 
 `AppendHandle` is for a walker that opens directories itself. It lists a raw
 Windows handle or Unix descriptor, the value `os.File.Fd` returns, without
@@ -299,6 +325,8 @@ filled for regular files only and is zero for every other type.
 | `Size`, `ModTimeNanos` | `getattrlistbulk` | `statx` | the listing record |
 | `ChangeTimeNanos` | `ATTR_CMN_CHGTIME` | `stx_ctime` | the listing's `ChangeTime` |
 | `FileID` | `ATTR_CMN_FILEID` | `stx_ino` | `FILE_ID_EXTD_DIR_INFO`'s `FileId`, when it fits 64 bits |
+
+Under [`Lister.Names`](#lister) every field but `Name` and `Type` is zero.
 
 - **`ChangeTimeNanos`** moves on every write and on every change to the file's
   metadata, such as its permissions. It is zero on other platforms and on a
@@ -394,8 +422,8 @@ for exactly this kind of package. If a future Go release closed that
 door, the package would stop building on macOS rather than misbehave, and
 `golang.org/x/sys` would be in the same position.
 
-The buffers the kernel fills, macOS attribute records, Linux `getdents64`
-records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
+The buffers the kernel fills, macOS attribute and `getdirentries64` records,
+Linux `getdents64` records and Windows `FILE_ID_EXTD_DIR_INFO` and `FILE_FULL_DIR_INFO` records, are walked in plain,
 bounds-checked Go on every platform and fuzzed in CI: a buffer that does not
 hold what it claims is `ErrMalformed`, never a panic. The assembly is two small pieces: the
 macOS trampoline above, and the amd64 SIMD decoder, which reads at most 30 bytes past a name,
@@ -414,7 +442,7 @@ Every change is tested in CI:
 - **Every decoder path:** the Windows name decoder with AVX2, with SSE2 only,
   and in pure Go.
 - **With and without cgo**, and under the race detector.
-- **Fuzzing:** the three record parsers and the name decoder, on all three
+- **Fuzzing:** the four record parsers and the name decoder, on all three
   platforms.
 
 Other systems get a portable fallback that CI vets but does not run.
