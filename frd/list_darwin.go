@@ -32,6 +32,9 @@ var requested = attrlist{
 
 const listOp = bulkOp
 
+// namesListOp is the call a Names listing's errors name here.
+const namesListOp = namesOp
+
 func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	fd := int(h)
 	if names {
@@ -80,6 +83,9 @@ func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
 			continue
 		}
 		if err != nil {
+			if errors.Is(err, syscall.EINVAL) && notDir(fd) {
+				err = syscall.ENOTDIR // what the bulk call says
+			}
 			return dst, &os.PathError{Op: namesOp, Err: err}
 		}
 		if n == 0 {
@@ -89,6 +95,13 @@ func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
 			return dst, err
 		}
 	}
+}
+
+// notDir reports whether fd is open on something other than a directory,
+// which getdirentries64 refuses with EINVAL.
+func notDir(fd int) bool {
+	var st unix.Stat_t
+	return unix.Fstat(fd, &st) == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR
 }
 
 // volumes holds, by fsid, whether each volume seen keeps its file ids:

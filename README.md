@@ -125,7 +125,7 @@ output and a line about the machine would be very welcome.
 
 ## API
 
-Eight names. Full documentation and runnable examples, including a tree walk,
+Nine names. Full documentation and runnable examples, including a tree walk,
 are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples).
 
 | Name | What it does |

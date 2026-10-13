@@ -44,7 +44,7 @@ func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (boo
 		mode, known := direntMode(dtype)
 		dst = append(dst, Entry{Type: mode})
 		e := &dst[len(dst)-1]
-		if !known || !namesOnly && mode.IsRegular() {
+		if !known || (!namesOnly && mode.IsRegular()) {
 			if found, err := stat(name, e); !found || err != nil {
 				dst = dst[:len(dst)-1]
 				return err

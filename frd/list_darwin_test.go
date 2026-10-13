@@ -169,3 +169,42 @@ func TestADirectoryThatCannotBeSearchedListsItsNames(t *testing.T) {
 		t.Fatalf("Lister{Names: true}.AppendDir = %+v, want %+v", entries, want)
 	}
 }
+
+// getdirentries64 answers EINVAL for a file, where the bulk call answers
+// ENOTDIR; a Names listing says what the full one says.
+func TestARegularFileUnderNamesIsNotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "a.go")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	l := Lister{Names: true}
+	_, err = l.AppendDir(nil, f)
+	pe, ok := errors.AsType[*os.PathError](err)
+	if !ok || pe.Op != namesOp || pe.Path != file || !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatalf("Lister{Names: true}.AppendDir on a file = %v, want a %s *os.PathError naming it and wrapping ENOTDIR", err, namesOp)
+	}
+}
+
+// A Names listing's errors name its own call, the ones the Lister makes
+// before any listing included.
+func TestAClosedOrNilDirectoryUnderNamesNamesItsCall(t *testing.T) {
+	f, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustClose(t, f)
+	l := Lister{Names: true}
+	_, err = l.AppendDir(nil, f)
+	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Op != namesOp || pe.Path != f.Name() || !errors.Is(err, fs.ErrClosed) {
+		t.Fatalf("Lister{Names: true}.AppendDir on a closed directory = %v, want a %s *os.PathError naming it and wrapping fs.ErrClosed", err, namesOp)
+	}
+	_, err = l.AppendDir(nil, nil)
+	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Op != namesOp || !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("Lister{Names: true}.AppendDir(nil, nil) = %v, want a %s *os.PathError wrapping os.ErrInvalid", err, namesOp)
+	}
+}

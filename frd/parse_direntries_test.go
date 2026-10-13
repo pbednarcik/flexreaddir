@@ -11,8 +11,10 @@ import (
 )
 
 // direntry packs one macOS dirent (__DARWIN_STRUCT_DIRENTRY): inode, seek
-// offset, record length, name length, type, then the NUL-terminated name,
-// the record padded to a multiple of eight bytes.
+// offset, record length, name length, type, then the NUL-terminated name.
+// The record is sized as APFS sizes it, from a 24-byte base rounded up to
+// eight ("." is 32 bytes, an 8-byte name 40, a 255-byte name 280), so it
+// carries the slack after the NUL that real records do.
 func direntry(name string, dtype byte) []byte { return direntryIno(name, dtype, 1) }
 
 func direntryIno(name string, dtype byte, ino uint64) []byte {
@@ -24,11 +26,29 @@ func direntryIno(name string, dtype byte, ino uint64) []byte {
 	b = append(b, dtype)
 	b = append(b, name...)
 	b = append(b, 0)
-	for len(b)%8 != 0 {
+	for len(b) < 24+len(name)+1 || len(b)%8 != 0 {
 		b = append(b, 0)
 	}
 	le.PutUint16(b[16:], uint16(len(b)))
 	return b
+}
+
+func TestTheFixtureIsSizedAsAPFSSizesARecord(t *testing.T) {
+	for name, want := range map[string]int{".": 32, "eightchr": 40, strings.Repeat("n", 255): 280} {
+		if got := len(direntry(name, dtRegular)); got != want {
+			t.Errorf("a record for %q is %d bytes, want %d", name, got, want)
+		}
+	}
+}
+
+// A deleted record is skipped before its name is checked: the kernel owes
+// no name to an entry it has already dropped.
+func TestADeletedDirentryIsSkippedWhateverItsName(t *testing.T) {
+	gone := direntryIno("gone", dtRegular, 0)
+	binary.LittleEndian.PutUint16(gone[18:], 0)
+	if got := direntries(t, slices.Concat(gone, direntry("kept", dtRegular))); !slices.Equal(got, []named{{"kept", dtRegular}}) {
+		t.Fatalf("visited %v, want kept alone", got)
+	}
 }
 
 func direntries(t *testing.T, buf []byte) []named {

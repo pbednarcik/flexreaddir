@@ -15,6 +15,9 @@ import (
 
 const listOp = "getdents64"
 
+// namesListOp is the call a Names listing's errors name: the same one.
+const namesListOp = listOp
+
 func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	fd := int(h)
 	var stx unix.Statx_t

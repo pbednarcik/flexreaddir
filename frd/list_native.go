@@ -30,7 +30,8 @@ type Lister struct {
 	// readdir is built on, and it is linked by every macOS binary that
 	// imports this package, whether or not Names is set; the App Store
 	// rejects a submitted binary that imports it. A command-line tool or a
-	// server is not affected.
+	// server is not affected. In /dev/fd, which the full listing reports as
+	// irregular entries, a Names listing types each descriptor by fstatat.
 	Names bool
 
 	buf []byte // what the kernel fills, allocated on first use
@@ -45,28 +46,36 @@ func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return l.appendDir(dst, dir)
 }
 
+// op names the call this Lister's errors carry.
+func (l *Lister) op() string {
+	if l.Names {
+		return namesListOp
+	}
+	return listOp
+}
+
 // appendDir lends readAll the directory's descriptor for the length of the
 // call, through SyscallConn, which keeps dir from being closed meanwhile.
 func (l *Lister) appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	if dir == nil {
-		return dst, &os.PathError{Op: listOp, Err: os.ErrInvalid}
+		return dst, &os.PathError{Op: l.op(), Err: os.ErrInvalid}
 	}
 	conn, err := dir.SyscallConn()
 	if err != nil {
-		return dst, &os.PathError{Op: listOp, Path: dir.Name(), Err: err}
+		return dst, &os.PathError{Op: l.op(), Path: dir.Name(), Err: err}
 	}
 	var readErr error
 	if err := conn.Control(func(fd uintptr) { dst, readErr = l.read(dst, fd) }); err != nil {
 		// Control fails only on a closed file, with poll's "use of closed
 		// file", which os reports as ErrClosed.
-		return dst, &os.PathError{Op: listOp, Path: dir.Name(), Err: os.ErrClosed}
+		return dst, &os.PathError{Op: l.op(), Path: dir.Name(), Err: os.ErrClosed}
 	}
-	return dst, pathError(readErr, dir.Name())
+	return dst, pathError(readErr, dir.Name(), l.op())
 }
 
 func (l *Lister) appendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error) {
 	dst, err := l.read(dst, fd)
-	return dst, pathError(err, name)
+	return dst, pathError(err, name, l.op())
 }
 
 func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
@@ -78,11 +87,11 @@ func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 	return readAll(dst, fd, l.buf, l.Names)
 }
 
-// pathError names the directory in err. listOp names the platform's listing
-// call; readAll returns an *os.PathError of its own for an entry that failed,
-// whose path, relative to the directory, is joined to name, and the macOS
-// names-only listing returns one with no path under its own call's name.
-func pathError(err error, name string) error {
+// pathError names the directory in err under op, the listing call; readAll
+// returns an *os.PathError of its own for an entry that failed, whose path,
+// relative to the directory, is joined to name, and the macOS names-only
+// listing returns one with no path under its own call's name.
+func pathError(err error, name, op string) error {
 	if err == nil {
 		return nil
 	}
@@ -90,5 +99,5 @@ func pathError(err error, name string) error {
 		pe.Path = filepath.Join(name, pe.Path)
 		return pe
 	}
-	return &os.PathError{Op: listOp, Path: name, Err: err}
+	return &os.PathError{Op: op, Path: name, Err: err}
 }

@@ -9,6 +9,9 @@ import (
 
 const listOp = "GetFileInformationByHandleEx"
 
+// namesListOp is the call a Names listing's errors name: the same one.
+const namesListOp = listOp
+
 // listClass is the information class a listing asks for. FILE_ID_EXTD_DIR_INFO
 // is the default: it fills Entry.FileID at the cost of 20 more bytes per
 // record. FILE_FULL_DIR_INFO is the fallback, and the tests' comparison.

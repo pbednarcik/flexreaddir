@@ -90,6 +90,9 @@ func eachDirentry(buf []byte, visit func(name []byte, dtype byte) error) error {
 		}
 		rec := buf[:length]
 		buf = buf[length:]
+		if le.Uint64(rec) == 0 {
+			continue // deleted: the kernel owes it no name
+		}
 		namlen := int(le.Uint16(rec[18:]))
 		if namlen < 1 || namlen >= length-direntryHeader { // the NUL must fit
 			return ErrMalformed
@@ -97,9 +100,6 @@ func eachDirentry(buf []byte, visit func(name []byte, dtype byte) error) error {
 		name := rec[direntryHeader : direntryHeader+namlen]
 		if rec[direntryHeader+namlen] != 0 || bytes.IndexByte(name, 0) >= 0 {
 			return ErrMalformed
-		}
-		if le.Uint64(rec) == 0 {
-			continue
 		}
 		if name[0] == '.' && (len(name) == 1 || len(name) == 2 && name[1] == '.') {
 			continue
