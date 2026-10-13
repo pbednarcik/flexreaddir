@@ -1,6 +1,8 @@
 package frd
 
 import (
+	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,6 +68,28 @@ func FuzzFullInfo(f *testing.F) {
 			}
 			if !extd && e.FileID != 0 {
 				t.Fatalf("%+v: FILE_FULL_DIR_INFO has no file id", e)
+			}
+		}
+	})
+}
+
+func FuzzDirentries(f *testing.F) {
+	f.Add(slices.Concat(direntry(".", dtDir), direntry("a.go", dtRegular), direntry("odd", dtUnknown)))
+	f.Add(slices.Concat(direntryIno("gone", dtRegular, 0), direntry("wh", dtWhiteout)))
+	f.Fuzz(func(t *testing.T, buf []byte) {
+		got, _ := parseDirentries(nil, buf, func(name []byte, e *Entry) (bool, error) {
+			if name[:len(name)+1][len(name)] != 0 {
+				t.Fatalf("%q reached stat without its NUL after it", name)
+			}
+			e.Type = fs.ModeSymlink
+			return true, nil
+		})
+		for _, e := range got {
+			if e.Name == "" || e.Name == "." || e.Name == ".." || strings.IndexByte(e.Name, 0) >= 0 {
+				t.Fatalf("listed the name %q", e.Name)
+			}
+			if e.Size != 0 || e.ModTimeNanos != 0 || e.ChangeTimeNanos != 0 || e.FileID != 0 {
+				t.Fatalf("%+v: a names listing carries no stamps", e)
 			}
 		}
 	})
