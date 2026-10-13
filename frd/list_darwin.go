@@ -56,8 +56,10 @@ func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 }
 
 // readNames lists fd by getdirentries64, the call readdir makes, which reads
-// the directory's own records and creates no vnode for the files it names. A
-// DT_UNKNOWN record is typed by fstatat of the name, never following a link.
+// the directory's own records and creates no vnode for the files it names,
+// and stops at the end the kernel reports in the buffer's last four bytes,
+// so a directory that fits one buffer costs one call. A DT_UNKNOWN record is
+// typed by fstatat of the name, never following a link.
 func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
 	var st unix.Stat_t
 	stat := func(name []byte, e *Entry) (bool, error) {
@@ -78,6 +80,9 @@ func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
 	}
 	var pos int64
 	for {
+		if len(buf) >= extendedBufferSize {
+			clear(buf[len(buf)-4:]) // a kernel that writes no flag word leaves no end claimed
+		}
 		n, err := getdirentries64(fd, buf, &pos)
 		if errors.Is(err, syscall.EINTR) {
 			continue
@@ -93,6 +98,9 @@ func readNames(dst []Entry, fd int, buf []byte) ([]Entry, error) {
 		}
 		if dst, err = parseDirentries(dst, buf[:n], stat); err != nil {
 			return dst, err
+		}
+		if endOfDirectory(buf, n) {
+			return dst, nil
 		}
 	}
 }

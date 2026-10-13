@@ -233,3 +233,30 @@ func TestAMalformedDirentryBufferNamesItsCall(t *testing.T) {
 		t.Fatalf("parseDirentries error = %v, want a %s *os.PathError with no path wrapping ErrMalformed", err, namesOp)
 	}
 }
+
+// With a buffer of at least 1,024 bytes the kernel keeps its last four for a
+// flag word, bit 0 set when the directory is at its end.
+func TestTheEndOfDirectoryFlagIsReadOnlyWhereTheKernelWritesIt(t *testing.T) {
+	flagged := func(size int) []byte {
+		b := make([]byte, size)
+		b[size-4] = 1
+		return b
+	}
+	for name, c := range map[string]struct {
+		buf  []byte
+		n    int
+		want bool
+	}{
+		"a large buffer with the flag set":       {flagged(1024), 100, true},
+		"a large buffer with the flag clear":     {make([]byte, 1024), 100, false},
+		"a buffer under the threshold":           {flagged(1020), 100, false},
+		"records reaching into the word":         {flagged(1024), 1021, false},
+		"records filling the buffer to the word": {flagged(1024), 1020, true},
+		"a 64 KiB buffer with the flag set":      {flagged(64 << 10), 65532, true},
+		"a 64 KiB buffer with another bit set":   {func() []byte { b := make([]byte, 64<<10); b[len(b)-4] = 2; return b }(), 100, false},
+	} {
+		if got := endOfDirectory(c.buf, c.n); got != c.want {
+			t.Errorf("%s: endOfDirectory = %v, want %v", name, got, c.want)
+		}
+	}
+}

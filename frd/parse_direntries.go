@@ -20,6 +20,24 @@ const dtWhiteout = 14
 // take listOp, the bulk call's name, when the directory's name is joined.
 const namesOp = "getdirentries64"
 
+// With a buffer of at least extendedBufferSize bytes (xnu's
+// GETDIRENTRIES64_EXTENDED_BUFSIZE, bsd/sys/dirent_private.h) the kernel
+// keeps the buffer's last four bytes for a flag word it writes on every
+// successful call, with flagEndOfDirectory (GETDIRENTRIES64_EOF) set once the
+// directory is at its end; the records never reach those bytes.
+const (
+	extendedBufferSize = 1024
+	flagEndOfDirectory = 1
+)
+
+// endOfDirectory reports whether the call that returned n bytes into buf
+// also reported the end of the directory, trusting the flag word only where
+// the kernel writes one and the records stop short of it.
+func endOfDirectory(buf []byte, n int) bool {
+	tail := len(buf) - 4
+	return len(buf) >= extendedBufferSize && n <= tail && binary.LittleEndian.Uint32(buf[tail:])&flagEndOfDirectory != 0
+}
+
 // parseDirentries appends an Entry for each getdirentries64 record in buf,
 // with one allocation for their names and at most one to grow dst. The
 // record's type settles every entry but DT_UNKNOWN, which stat types from the

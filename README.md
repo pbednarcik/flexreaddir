@@ -284,6 +284,9 @@ vnodes not cached, a names-only walk of the Linux kernel source ran 149 ms
 against 268 for the full listing on one goroutine, and 87 against 161 on
 eighteen; on Linux, where the full listing is a `statx` per file, 19 ms
 against 57 ([the measurement](docs/notes/evidence/2026-10-13-names-only-listing.md)).
+A directory that fits the buffer is one call: the kernel reports the end in
+the buffer itself, which took another 5% off the sequential walk and 4% off
+the parallel one ([measured](docs/notes/evidence/2026-10-13-eof-flag-macos.md)).
 
 ```go
 l := frd.Lister{Names: true}
