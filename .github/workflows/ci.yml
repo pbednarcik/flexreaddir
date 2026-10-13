@@ -69,5 +69,6 @@ jobs:
           go-version: stable
       - run: go test -run '^$' -fuzz '^FuzzRecords$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzDirents$' -fuzztime 30s ./frd
+      - run: go test -run '^$' -fuzz '^FuzzDirentries$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzFullInfo$' -fuzztime 30s ./frd
       - run: go test -run '^$' -fuzz '^FuzzAppendUTF16$' -fuzztime 30s ./frd

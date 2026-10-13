@@ -21,7 +21,9 @@ type Lister struct {
 	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
 	// On macOS it lists by getdirentries64, which reads the directory's
 	// records alone, so it costs the same whether or not the files' vnodes
-	// are cached, and needs list permission only. Set it before the first
+	// are cached, and needs list permission only; an entry whose record
+	// carries no type (never on APFS; /dev/fd for one) is stat'ed for it,
+	// which needs search permission too. Set it before the first
 	// call on a directory and keep it for that directory: the two macOS
 	// calls keep the descriptor's position differently, so mixing them on
 	// one descriptor repeats or skips entries.
@@ -30,8 +32,7 @@ type Lister struct {
 	// readdir is built on, and it is linked by every macOS binary that
 	// imports this package, whether or not Names is set; the App Store
 	// rejects a submitted binary that imports it. A command-line tool or a
-	// server is not affected. In /dev/fd, which the full listing reports as
-	// irregular entries, a Names listing types each descriptor by fstatat.
+	// server is not affected.
 	Names bool
 
 	buf []byte // what the kernel fills, allocated on first use

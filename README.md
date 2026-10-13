@@ -271,7 +271,9 @@ on every platform. On macOS the listing is `getdirentries64`, the call
 `readdir` makes: it reads the directory's records alone, so it costs the same
 whether or not the files' vnodes are cached, and it needs list permission
 only, so a directory that may be read but not searched lists where the full
-listing fails. Set it before the first call on a directory and keep it for
+listing fails. The exception is an entry whose record carries no type, which
+APFS never returns and `/dev/fd` does: it is stat'ed for its type, which
+needs search permission. Set it before the first call on a directory and keep it for
 that directory; the two macOS calls keep the descriptor's position
 differently, so mixing them on one descriptor repeats or skips entries.
 `getdirentries64` is a private libSystem symbol (`__getdirentries64`), linked
