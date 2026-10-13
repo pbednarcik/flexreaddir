@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"runtime"
 	"slices"
 	"syscall"
 	"testing"
@@ -276,5 +277,51 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 		if _, err := parseRecords(nil, c.buf, c.n, keepIDs); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: parseRecords error = %v, want ErrMalformed", name, err)
 		}
+	}
+}
+
+// The names of one buffer are sized before they are checked, so the size
+// must stay within the buffer whatever lengths a malformed record claims.
+func TestTheNamesAreSizedWithinTheBuffer(t *testing.T) {
+	file := rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1}
+	long := file.bytes()
+	binary.LittleEndian.PutUint32(long[32:], 0xfffffff0) // the name's length, after its offset at 28
+	buf := records(file, file)
+	for name, c := range map[string]struct {
+		buf  []byte
+		n    int
+		want int
+	}{
+		"two names":                        {buf, 2, 8},
+		"a name longer than its record":    {long, 1, len(long)},
+		"more records claimed":             {buf, 1 << 26, 8},
+		"a record shorter than its header": {buf[:12], 1, 0},
+	} {
+		if got := nameBytes(c.buf, c.n); got != c.want {
+			t.Errorf("%s: nameBytes = %d, want %d", name, got, c.want)
+		}
+	}
+}
+
+// The entries are sized from the count the kernel returned, so a count no
+// buffer could hold must not size them.
+func TestACountTheBufferCannotHoldDoesNotSizeTheEntries(t *testing.T) {
+	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1})
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := parseRecords(nil, buf, 1<<26, keepIDs)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("parseRecords error = %v, want ErrMalformed", err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+		t.Errorf("parseRecords allocated %d bytes for a one-record buffer", grew)
+	}
+}
+
+func TestANegativeCountListsNothing(t *testing.T) {
+	got, err := parseRecords(nil, []byte("0"), -60, keepIDs)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("parseRecords = %v, %v; want nothing", got, err)
 	}
 }

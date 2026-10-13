@@ -67,14 +67,9 @@ func vtypeMode(objtype uint32) fs.FileMode {
 // persist, asked once for each run of records from one volume. On a malformed
 // record it returns the entries before it with the error.
 func parseRecords(dst []Entry, buf []byte, n int, persistent func(fsid uint64) bool) ([]Entry, error) {
-	nameBytes, entries := 0, 0
-	_ = eachRecord(buf, n, func(r record) {
-		nameBytes += len(r.name)
-		entries++
-	})
-	dst = slices.Grow(dst, entries)
+	dst = slices.Grow(dst, max(0, min(n, len(buf)/recordHeader)))
 	var names nameBlock
-	names.grow(nameBytes)
+	names.grow(nameBytes(buf, n))
 	var fsid uint64
 	asked, keep := false, false
 	err := eachRecord(buf, n, func(r record) {
@@ -91,6 +86,38 @@ func parseRecords(dst []Entry, buf []byte, n int, persistent func(fsid uint64) b
 		dst = append(dst, e)
 	})
 	return dst, err
+}
+
+// nameBytes sizes the names of the n records in buf from the lengths their
+// name references claim, before any record is checked: a wrong size costs
+// nameBlock an allocation or some spare bytes, never a wrong name. Each name
+// counts at most its record's length, so the size stays within buf.
+func nameBytes(buf []byte, n int) int {
+	le := binary.LittleEndian
+	total, at := 0, 0
+	for range n {
+		if len(buf)-at < recordHeader {
+			break
+		}
+		length := int(le.Uint32(buf[at:]))
+		if length < recordHeader || length > len(buf)-at {
+			break
+		}
+		rec := buf[at : at+length]
+		at += length
+		common := le.Uint32(rec[4:])
+		ref := recordHeader
+		if common&attrError != 0 {
+			ref += 4
+		}
+		if common&attrName == 0 || len(rec)-ref < 8 {
+			continue
+		}
+		if size := int64(le.Uint32(rec[ref+4:])); size > 1 { // the length counts the NUL
+			total += int(min(size-1, int64(length)))
+		}
+	}
+	return total
 }
 
 // record is one entry's attributes as the kernel returned them.
