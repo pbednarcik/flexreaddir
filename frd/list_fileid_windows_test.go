@@ -106,6 +106,17 @@ func TestTheFullClassListsTheSameWithoutFileIDs(t *testing.T) {
 	}
 }
 
+// A Names listing leaves FileID zero, so it asks for the class without the
+// id, whose records are 20 bytes shorter; a full listing asks for listClass.
+func TestANamesListingAsksForTheClassWithoutTheID(t *testing.T) {
+	if got := classFor(true); got != windows.FileFullDirectoryInfo {
+		t.Errorf("classFor(names) = %d, want FILE_FULL_DIR_INFO (%d)", got, windows.FileFullDirectoryInfo)
+	}
+	if got := classFor(false); got != listClass {
+		t.Errorf("classFor(full) = %d, want listClass (%d)", got, listClass)
+	}
+}
+
 func TestWindowsFileIDIsTheFilesOwnID(t *testing.T) {
 	dir := t.TempDir()
 	if !onNTFS(t, dir) {
