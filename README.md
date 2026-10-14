@@ -21,7 +21,8 @@
   `statx` on Linux, `FILE_ID_EXTD_DIR_INFO` on Windows.
 - **Names and types alone, when that is all you need.** `Lister.Names` lists
   by `getdirentries64` on macOS, which reads the directory's records and
-  leaves the files' vnodes alone, and skips the `statx` per file on Linux.
+  leaves the files' vnodes alone, skips the `statx` per file on Linux, and
+  asks for the shorter record without the file id on Windows.
 - **Profiled down to the kernel.** FlexReadDir's own code is about 4% of a
   listing on macOS, 5% on Linux and under 13% on Windows; the rest is the
   operating system's time.
@@ -283,10 +284,11 @@ command-line tool or a server is not affected. On this Mac, with the files'
 vnodes not cached, a names-only walk of the Linux kernel source ran 149 ms
 against 268 for the full listing on one goroutine, and 87 against 161 on
 eighteen; on Linux, where the full listing is a `statx` per file, 19 ms
-against 57 ([the measurement](docs/notes/evidence/2026-10-13-names-only-listing.md)).
-A directory that fits the buffer is one call: the kernel reports the end in
-the buffer itself, which took another 5% off the sequential walk and 4% off
-the parallel one ([measured](docs/notes/evidence/2026-10-13-eof-flag-macos.md)).
+against 57. A directory that fits the buffer is one call: the kernel reports
+the end in the buffer itself, which took another 5% off the sequential walk
+and 4% off the parallel one. On Windows a `Names` listing asks for
+`FILE_FULL_DIR_INFO`, the record without the file id: 6 to 7% faster on a
+directory of short names, 2.7% on System32.
 
 ```go
 l := frd.Lister{Names: true}
