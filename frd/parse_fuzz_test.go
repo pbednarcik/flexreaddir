@@ -73,6 +73,15 @@ func FuzzFullInfo(f *testing.F) {
 				t.Fatalf("%+v: FILE_FULL_DIR_INFO has no file id", e)
 			}
 		}
+		// The written-out walk against the reference, into reused slots.
+		junk := Entry{Name: "junk", Type: fs.ModeDir, Size: -1, ModTimeNanos: -1, ChangeTimeNanos: -1, FileID: 1}
+		for _, names := range []bool{false, true} {
+			got, err := parseFullInfo(slices.Repeat([]Entry{junk}, 4)[:0], buf, l, names)
+			want, wantErr := parseFullInfoByVisitor(nil, buf, l, names)
+			if (err == nil) != (wantErr == nil) || !slices.Equal(got, want) {
+				t.Fatalf("names=%v: got %+v, %v; the reference gives %+v, %v", names, got, err, want, wantErr)
+			}
+		}
 	})
 }
 

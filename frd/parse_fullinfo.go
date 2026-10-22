@@ -58,38 +58,58 @@ func parseFullInfo(dst []Entry, buf []byte, l layout, names bool) ([]Entry, erro
 	if units > 0 {
 		block = make([]byte, 0, units+32)
 	}
-	err := eachFullInfo(buf, l, func(r fullInfo) error {
-		start := len(block)
-		var ok bool
-		if block, ok = appendUTF16(block, r.name); !ok {
-			return ErrMalformed // a NUL unit; no Windows name holds one
+	// Records are chained by NextEntryOffset and the last one's is zero; the
+	// bytes after it are whatever the buffer held before. Each Entry is
+	// stored into its slot field by field, not built aside and copied in.
+	le := binary.LittleEndian
+	for {
+		if len(buf) < l.header {
+			return dst, ErrMalformed
 		}
-		name := unsafe.String(unsafe.SliceData(block[start:]), len(block)-start)
-		e := Entry{Name: name, Type: attrMode(r.attrs, r.tag)}
-		if !names && e.Type.IsRegular() {
-			e.Size, e.ModTimeNanos, e.FileID = r.size, (r.writeTime-windowsEpoch)*100, r.fileID
-			if r.changeTime != 0 { // zero: a filesystem that keeps no change time
-				e.ChangeTimeNanos = (r.changeTime - windowsEpoch) * 100
+		next := int(le.Uint32(buf))
+		nameLen := int(le.Uint32(buf[60:]))
+		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-l.header {
+			return dst, ErrMalformed
+		}
+		if u := buf[l.header : l.header+nameLen]; !dotOrDotDot(u) {
+			start := len(block)
+			var ok bool
+			if block, ok = appendUTF16(block, u); !ok {
+				return dst, ErrMalformed // a NUL unit; no Windows name holds one
+			}
+			typ := attrMode(le.Uint32(buf[56:]), le.Uint32(buf[l.tag:]))
+			if len(dst) == cap(dst) {
+				dst = slices.Grow(dst, 1)
+			}
+			dst = dst[:len(dst)+1]
+			e := &dst[len(dst)-1]
+			e.Name = unsafe.String(unsafe.SliceData(block[start:]), len(block)-start)
+			e.Type = typ
+			e.Size, e.ModTimeNanos, e.ChangeTimeNanos, e.FileID = 0, 0, 0, 0
+			if !names && typ.IsRegular() {
+				e.Size = int64(le.Uint64(buf[40:]))
+				e.ModTimeNanos = (int64(le.Uint64(buf[24:])) - windowsEpoch) * 100
+				if ct := int64(le.Uint64(buf[32:])); ct != 0 { // zero: a filesystem that keeps no change time
+					e.ChangeTimeNanos = (ct - windowsEpoch) * 100
+				}
+				// A 128-bit id (ReFS, Dev Drive) or the all-ones "unknown" does
+				// not fit FileID; 0 says unknown, never a truncated id.
+				if l.id != 0 && le.Uint64(buf[l.id+8:]) == 0 {
+					e.FileID = le.Uint64(buf[l.id:])
+				}
 			}
 		}
-		dst = append(dst, e)
-		return nil
-	})
-	return dst, err
+		if next == 0 {
+			return dst, nil
+		}
+		if next < l.header+nameLen || next > len(buf) {
+			return dst, ErrMalformed
+		}
+		buf = buf[next:]
+	}
 }
 
-// fullInfo is one entry as the kernel returned it; name is its UTF-16LE bytes.
-type fullInfo struct {
-	name       []byte
-	attrs      uint32
-	tag        uint32
-	size       int64
-	writeTime  int64  // FILETIME
-	changeTime int64  // FILETIME
-	fileID     uint64 // the FileId's low half when its high half is 0, else 0
-}
-
-// fullInfoSizes counts the records chained in buf that eachFullInfo visits
+// fullInfoSizes counts the records chained in buf that parseFullInfo lists
 // and the UTF-16 units of their names, from the record headers alone and
 // stopping at the first it cannot follow: a wrong count costs an allocation,
 // never a wrong name.
@@ -111,50 +131,6 @@ func fullInfoSizes(buf []byte, l layout) (entries, units int) {
 		buf = buf[next:]
 	}
 	return entries, units
-}
-
-// eachFullInfo calls visit for every record chained in buf except "." and
-// "..", stopping at the first error visit returns. Records are chained by
-// NextEntryOffset and the last one's is zero; the bytes after it are whatever
-// the buffer held before. The name's units are the visitor's to check.
-func eachFullInfo(buf []byte, l layout, visit func(fullInfo) error) error {
-	le := binary.LittleEndian
-	for {
-		if len(buf) < l.header {
-			return ErrMalformed
-		}
-		next := int(le.Uint32(buf))
-		nameLen := int(le.Uint32(buf[60:]))
-		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-l.header {
-			return ErrMalformed
-		}
-		name := buf[l.header : l.header+nameLen]
-		if !dotOrDotDot(name) {
-			r := fullInfo{
-				name:       name,
-				attrs:      le.Uint32(buf[56:]),
-				tag:        le.Uint32(buf[l.tag:]),
-				size:       int64(le.Uint64(buf[40:])),
-				writeTime:  int64(le.Uint64(buf[24:])),
-				changeTime: int64(le.Uint64(buf[32:])),
-			}
-			// A 128-bit id (ReFS, Dev Drive) or the all-ones "unknown" does
-			// not fit FileID; 0 says unknown, never a truncated id.
-			if l.id != 0 && le.Uint64(buf[l.id+8:]) == 0 {
-				r.fileID = le.Uint64(buf[l.id:])
-			}
-			if err := visit(r); err != nil {
-				return err
-			}
-		}
-		if next == 0 {
-			return nil
-		}
-		if next < l.header+nameLen || next > len(buf) {
-			return ErrMalformed
-		}
-		buf = buf[next:]
-	}
 }
 
 // dotOrDotDot reports whether the UTF-16LE name is "." or "..".

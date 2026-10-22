@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -303,4 +304,113 @@ func TestAFullInfoNamesListingCarriesNamesAndTypesOnly(t *testing.T) {
 			t.Fatalf("%s: got %+v, want %+v", lc.name, got, want)
 		}
 	}
+}
+
+// parseFullInfo fills each Entry in dst's next slot field by field, so a slot
+// a walker reuses from its last listing must keep nothing of it, whatever
+// fields Entry gains.
+func TestParseFullInfoKeepsNothingOfAReusedSlot(t *testing.T) {
+	var junk Entry
+	v := reflect.ValueOf(&junk).Elem()
+	for i := range v.NumField() {
+		switch f := v.Field(i); f.Kind() {
+		case reflect.String:
+			f.SetString("junk")
+		case reflect.Int64:
+			f.SetInt(-1)
+		case reflect.Uint32, reflect.Uint64:
+			f.SetUint(^uint64(0))
+		default:
+			t.Fatalf("Entry.%s: a kind this test cannot fill", v.Type().Field(i).Name)
+		}
+	}
+	buf := finfos(
+		finfo{name: "a.go", attrs: 0x20, size: 1, writeTime: unixFiletime(1, 0), changeTime: unixFiletime(2, 0), lo: 5},
+		finfo{name: "b.go", attrs: 0x20, size: 2, writeTime: unixFiletime(3, 0)}, // no change time, no id
+		finfo{name: "d", attrs: attrDirectory, writeTime: unixFiletime(1, 0), lo: 6},
+	)
+	for _, names := range []bool{false, true} {
+		want, err := parseFullInfo(nil, buf, idExtdDirInfo, names)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reused := slices.Repeat([]Entry{junk}, len(want))
+		if got, err := parseFullInfo(reused[:0], buf, idExtdDirInfo, names); err != nil || !slices.Equal(got, want) {
+			t.Fatalf("names=%v: got %+v, %v; want %+v", names, got, err, want)
+		}
+	}
+}
+
+// fullInfo is one entry as the kernel returned it; name is its UTF-16LE bytes.
+type fullInfo struct {
+	name       []byte
+	attrs      uint32
+	tag        uint32
+	size       int64
+	writeTime  int64  // FILETIME
+	changeTime int64  // FILETIME
+	fileID     uint64 // the FileId's low half when its high half is 0, else 0
+}
+
+// eachFullInfo is the record walk parseFullInfo writes out, kept as the tests'
+// reference. It calls visit for every record chained in buf except "." and
+// "..", stopping at the first error visit returns.
+func eachFullInfo(buf []byte, l layout, visit func(fullInfo) error) error {
+	le := binary.LittleEndian
+	for {
+		if len(buf) < l.header {
+			return ErrMalformed
+		}
+		next := int(le.Uint32(buf))
+		nameLen := int(le.Uint32(buf[60:]))
+		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-l.header {
+			return ErrMalformed
+		}
+		name := buf[l.header : l.header+nameLen]
+		if !dotOrDotDot(name) {
+			r := fullInfo{
+				name:       name,
+				attrs:      le.Uint32(buf[56:]),
+				tag:        le.Uint32(buf[l.tag:]),
+				size:       int64(le.Uint64(buf[40:])),
+				writeTime:  int64(le.Uint64(buf[24:])),
+				changeTime: int64(le.Uint64(buf[32:])),
+			}
+			if l.id != 0 && le.Uint64(buf[l.id+8:]) == 0 {
+				r.fileID = le.Uint64(buf[l.id:])
+			}
+			if err := visit(r); err != nil {
+				return err
+			}
+		}
+		if next == 0 {
+			return nil
+		}
+		if next < l.header+nameLen || next > len(buf) {
+			return ErrMalformed
+		}
+		buf = buf[next:]
+	}
+}
+
+// parseFullInfoByVisitor is parseFullInfo built on eachFullInfo, with each
+// name copied; FuzzFullInfo holds the two equal.
+func parseFullInfoByVisitor(dst []Entry, buf []byte, l layout, names bool) ([]Entry, error) {
+	var block []byte
+	err := eachFullInfo(buf, l, func(r fullInfo) error {
+		var ok bool
+		if block, ok = appendUTF16(block[:0], r.name); !ok {
+			return ErrMalformed
+		}
+		e := Entry{Name: string(block), Type: attrMode(r.attrs, r.tag)}
+		if !names && e.Type.IsRegular() {
+			e.Size, e.ModTimeNanos, e.FileID = r.size, (r.writeTime-windowsEpoch)*100, r.fileID
+			if r.changeTime != 0 {
+				e.ChangeTimeNanos = (r.changeTime - windowsEpoch) * 100
+			}
+		}
+		dst = append(dst, e)
+		return nil
+	})
+	return dst, err
 }
