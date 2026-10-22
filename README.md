@@ -68,7 +68,7 @@ allocates a few times per directory.
 ## Speed
 
 <p align="center">
-  <img src=".github/assets/speed.svg" alt="Listing 1,000 files: macOS 3.8 times, Linux 1.6 times and Windows 1.3 times faster than os.File.ReadDir plus Info" width="720">
+  <img src=".github/assets/speed.svg" alt="Listing 1,000 files: macOS 3.7 times, Linux 1.6 times and Windows 1.3 times faster than os.File.ReadDir plus Info" width="720">
 </p>
 
 Every name and type, plus the size and modification time of every regular
@@ -76,8 +76,8 @@ file, from one directory; lower is better.
 
 | Platform | Files | `ReadDir` + `Info` | `Readdir` | FlexReadDir | Faster |
 |---|---:|---:|---:|---:|---:|
-| macOS | 1,000 | 1,382 µs | 947 µs | **362 µs** | **3.8×** |
-| | 10 | 25.3 µs | 20.6 µs | **13.6 µs** | **1.9×** |
+| macOS | 1,000 | 1,339 µs | 910 µs | **365 µs** | **3.7×** |
+| | 10 | 24.5 µs | 20.0 µs | **12.7 µs** | **1.9×** |
 | Linux (VM) | 1,000 | 603 µs | 465 µs | **376 µs** | **1.6×** |
 | | 10 | 7.8 µs | 6.7 µs | **5.8 µs** | **1.3×** |
 | Windows | 1,000 | 164.3 µs | 161.3 µs | **131.1 µs** | **1.3×** |
@@ -96,9 +96,9 @@ standard library's listing, not with tree walkers.
 |---|---|---|---|
 | CPU | Apple M5 Max, 18 cores (6 super, 12 performance) | the same Mac, 18 vCPUs | AMD Ryzen 9 9950X, Zen 5, 16 cores, 32 threads |
 | Memory | 128 GB | the VM's share of the Mac's | 96 GB |
-| System | macOS 27.0 | OrbStack's Linux VM, kernel 7.0, a Docker container (`golang:1.27`, arm64) | Windows 11 Pro |
+| System | macOS 27.0.1 | OrbStack's Linux VM, kernel 7.0, a Docker container (`golang:1.27`, arm64) | Windows 11 Pro |
 | Storage | APFS on the internal SSD | a Docker volume (btrfs) inside the VM, not a folder shared from the Mac | NTFS on an Intel Optane P5800X, a RAM block cache in front of it |
-| Go | 1.27.1 | 1.27.1 | 1.27.0 |
+| Go | 1.27.3 | 1.27.1 | 1.27.0 |
 | Runs | natively | in a VM | natively, pinned to one 8-core CCD |
 
 Linux is not bare metal: a VM adds cost to every system call, so its rows show
