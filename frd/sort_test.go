@@ -1,7 +1,10 @@
 package frd
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -37,11 +40,92 @@ func TestCompareNameOrdersByName(t *testing.T) {
 	}
 }
 
+// Also with merges, buffered and split: the merge buffer lives on the stack.
 func TestSortByNameAllocatesNothing(t *testing.T) {
-	orig := entriesNamed(sortNames)
-	work := make([]Entry, len(orig))
-	if n := testing.AllocsPerRun(20, func() { copy(work, orig); SortByName(work) }); n != 0 {
-		t.Fatalf("%v allocations per sort", n)
+	interleaved := make([]Entry, 1000)
+	for i := range interleaved {
+		interleaved[i] = Entry{Name: fmt.Sprintf("f%04d", (i%500)*2+i/500)}
+	}
+	for _, orig := range [][]Entry{entriesNamed(sortNames), interleaved} {
+		work := make([]Entry, len(orig))
+		if n := testing.AllocsPerRun(20, func() { copy(work, orig); SortByName(work) }); n != 0 {
+			t.Fatalf("%d entries: %v allocations per sort", len(orig), n)
+		}
+	}
+}
+
+// SortByName gives what slices.SortStableFunc gives, equal names in their
+// first order, on every shape a listing comes in and at every length around
+// the block and buffer sizes, so each merge path runs: the trims, the
+// buffered merges from either end, both splits and every rotation.
+func TestSortByNameAgreesWithTheStableSort(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	word := func(alphabet string, n int) string {
+		b := make([]byte, 1+rng.IntN(n))
+		for i := range b {
+			b[i] = alphabet[rng.IntN(len(alphabet))]
+		}
+		return string(b)
+	}
+	shapes := map[string]func(n int) []Entry{
+		"random": func(n int) []Entry {
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: word("abcdefgh", 6)}
+			}
+			return es
+		},
+		"few names": func(n int) []Entry {
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: word("ab", 2)}
+			}
+			return es
+		},
+		"NTFS order": func(n int) []Entry { // case-insensitive, which byte order breaks
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: word("aAbB_cC.", 8)}
+			}
+			slices.SortStableFunc(es, func(a, b Entry) int { return strings.Compare(strings.ToUpper(a.Name), strings.ToUpper(b.Name)) })
+			return es
+		},
+		"sorted": func(n int) []Entry {
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: fmt.Sprintf("f%06d", i)}
+			}
+			return es
+		},
+		"reversed": func(n int) []Entry {
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: fmt.Sprintf("f%06d", n-i)}
+			}
+			return es
+		},
+		"two interleaved runs": func(n int) []Entry {
+			es := make([]Entry, n)
+			for i := range es {
+				es[i] = Entry{Name: fmt.Sprintf("f%06d", (i%(n/2+1))*2+i/(n/2+1))}
+			}
+			return es
+		},
+		"one name": func(n int) []Entry { return slices.Repeat([]Entry{{Name: "same"}}, n) },
+	}
+	for shape, gen := range shapes {
+		for _, n := range []int{0, 1, 2, 3, 19, 20, 21, 31, 32, 33, 39, 40, 41, 63, 64, 65, 100, 160, 257, 1000, 5000} {
+			es := gen(n)
+			for i := range es {
+				es[i].Size = int64(i) // tells equal names apart
+			}
+			want := slices.Clone(es)
+			slices.SortStableFunc(want, CompareName)
+			SortByName(es)
+			if !slices.Equal(es, want) {
+				t.Fatalf("%s, %d entries: the order differs from slices.SortStableFunc's", shape, n)
+			}
+		}
 	}
 }
 
