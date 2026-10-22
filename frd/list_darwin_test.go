@@ -2,11 +2,13 @@ package frd
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -117,12 +119,13 @@ func TestTheVolumeCapabilitiesSayWhetherIDsPersist(t *testing.T) {
 	}
 }
 
-// A volume that cannot be asked gives no ids for this listing, and is asked
-// again by the next one rather than remembered.
+// A volume that cannot be asked gives no answer for this listing, so no ids
+// and no end skipped, and is asked again by the next one rather than
+// remembered.
 func TestAVolumeThatCannotBeAskedGivesNoIDsAndIsNotRemembered(t *testing.T) {
 	const fsid = 1<<63 | 42
-	if persistentIDs(-1, fsid) {
-		t.Fatal("a volume that cannot be asked kept its ids")
+	if v, ok := volumeFor(-1, fsid); ok || v != (volumeInfo{}) {
+		t.Fatalf("volumeFor(-1) = %+v, %v; want nothing", v, ok)
 	}
 	if _, remembered := volumes.Load(uint64(fsid)); remembered {
 		t.Fatal("the failed answer was cached")
@@ -137,16 +140,19 @@ func TestTheCacheHoldsTheWholeAnswer(t *testing.T) {
 	defer mustCloseRaw(t, fd)
 	volumes.Delete(uint64(fsid))
 	defer volumes.Delete(uint64(fsid))
-	if !persistentIDs(int(fd), fsid) {
-		t.Fatal("the tests' volume keeps its ids")
+	if v, ok := volumeFor(int(fd), fsid); !ok || !persists(v.caps) || !v.apfs {
+		t.Fatalf("volumeFor = %+v, %v; the tests' volume is APFS and keeps its ids", v, ok)
 	}
 	v, ok := volumes.Load(uint64(fsid))
-	caps, isCaps := v.(VolumeCaps)
-	if !ok || !isCaps {
-		t.Fatalf("cached %T %v, want a VolumeCaps", v, v)
+	info, isInfo := v.(volumeInfo)
+	if !ok || !isInfo {
+		t.Fatalf("cached %T %v, want a volumeInfo", v, v)
 	}
-	if set, known := caps.CaseSensitive(); set || !known {
+	if set, known := info.caps.CaseSensitive(); set || !known {
 		t.Errorf("the cached answer lost the case bit: %v, %v", set, known)
+	}
+	if !info.apfs {
+		t.Error("the cached answer lost the volume's type")
 	}
 }
 
@@ -250,5 +256,219 @@ func TestAClosedOrNilDirectoryUnderNamesNamesItsCall(t *testing.T) {
 	_, err = l.AppendDir(nil, nil)
 	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Op != namesOp || !errors.Is(err, os.ErrInvalid) {
 		t.Fatalf("Lister{Names: true}.AppendDir(nil, nil) = %v, want a %s *os.PathError wrapping os.ErrInvalid", err, namesOp)
+	}
+}
+
+// The largest record the listing's attributes can produce: the length and
+// the five returned groups (24 bytes), the error (4), the name's reference
+// and the fsid (8 each), the object type (4), the two times (16 each), the
+// file id and the data length (8 each), 96 in all; then the name, at most
+// NAME_MAX * 3 + 1 bytes with its NUL, 766 padded to 768. 864 is a multiple
+// of 8, as every record's length is.
+func TestTheLargestRecordIs864Bytes(t *testing.T) {
+	if got := recordBound(requested); got != 864 {
+		t.Fatalf("recordBound(requested) = %d, want 864", got)
+	}
+}
+
+// An attribute recordBound cannot size gives a bound no buffer meets, so no
+// end call is skipped.
+func TestAnAttributeOfUnknownSizeLeavesNoRoomForTheLargestRecord(t *testing.T) {
+	const devID = 0x00000002 // ATTR_CMN_DEVID
+	for name, al := range map[string]attrlist{
+		"a common one":    {bitmapCount: 5, common: requested.common | devID, file: requested.file},
+		"a directory one": {bitmapCount: 5, common: requested.common, directory: attrDirLinkCount, file: requested.file},
+	} {
+		if got := recordBound(al); got <= bufferBytes {
+			t.Errorf("%s: recordBound = %d, want more than the %d-byte buffer", name, got, bufferBytes)
+		}
+	}
+}
+
+// bulkCalls lists dir through the package's bulk loop, counting the calls:
+// it returns the entries and the records each call returned.
+func bulkCalls(t *testing.T, dir string) ([]Entry, []int) {
+	t.Helper()
+	fd := openRaw(t, dir)
+	defer mustCloseRaw(t, fd)
+	var calls []int
+	count := func(fd int, al *attrlist, buf []byte) (int, error) {
+		n, err := getattrlistbulk(fd, al, buf)
+		if err == nil {
+			calls = append(calls, n)
+		}
+		return n, err
+	}
+	got, err := readBulk(nil, int(fd), make([]byte, bufferBytes), count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got, calls
+}
+
+// makeFiles creates n empty files in dir, named by name(i).
+func makeFiles(t *testing.T, dir string, n int, name func(int) string) {
+	t.Helper()
+	for i := range n {
+		if err := os.WriteFile(filepath.Join(dir, name(i)), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// listsWhole fails the test unless got holds exactly the n names name(i).
+func listsWhole(t *testing.T, got []Entry, n int, name func(int) string) {
+	t.Helper()
+	seen := make(map[string]bool, len(got))
+	for _, e := range got {
+		seen[e.Name] = true
+	}
+	if len(got) != n || len(seen) != n {
+		t.Fatalf("listed %d entries, %d names; want %d", len(got), len(seen), n)
+	}
+	for i := range n {
+		if !seen[name(i)] {
+			t.Fatalf("%s is missing", name(i))
+		}
+	}
+}
+
+func shortName(i int) string { return fmt.Sprintf("file%04d.go", i) }
+
+// variedName gives records of 104 to 344 bytes, so a full call leaves up to
+// a few hundred bytes free, less than the record that did not fit.
+func variedName(i int) string { return fmt.Sprintf("%04d-%s", i, strings.Repeat("x", i*37%240)) }
+
+// On APFS a call that left room for the largest record was the directory's
+// last, so a directory that fits one buffer takes one call: 576 records of
+// 112 bytes leave 1,024 of the 65,536.
+func TestAnAPFSDirectoryThatFitsOneBufferTakesOneCall(t *testing.T) {
+	dir := t.TempDir()
+	const files = 576
+	makeFiles(t, dir, files, shortName)
+	got, calls := bulkCalls(t, dir)
+	listsWhole(t, got, files, shortName)
+	if !slices.Equal(calls, []int{files}) {
+		t.Fatalf("the calls returned %v records, want one call of %d", calls, files)
+	}
+}
+
+// A directory of several buffers lists whole on APFS, and its last call,
+// short, ends it: no call returns 0.
+func TestAnAPFSDirectoryOfSeveralBuffersListsWholeWithoutTheEndCall(t *testing.T) {
+	dir := t.TempDir()
+	const files = 3000
+	makeFiles(t, dir, files, variedName)
+	got, calls := bulkCalls(t, dir)
+	listsWhole(t, got, files, variedName)
+	if len(calls) < 2 || slices.Contains(calls, 0) {
+		t.Fatalf("the calls returned %v records, want several and none of 0", calls)
+	}
+}
+
+// HFS+ returns short batches before a directory's end, so there the listing
+// asks until a call returns 0.
+func TestAnHFSPlusDirectoryListsWhole(t *testing.T) {
+	dir := filepath.Join(mountedImage(t, "HFS+"), "sub")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const files = 500
+	makeFiles(t, dir, files, shortName)
+	got, calls := bulkCalls(t, dir)
+	listsWhole(t, got, files, shortName)
+	if calls[len(calls)-1] != 0 {
+		t.Fatalf("the calls returned %v records, want the last to return 0", calls)
+	}
+	if got := readDir(t, dir); len(got) != files {
+		t.Fatalf("AppendDir listed %d entries, want %d", len(got), files)
+	}
+}
+
+// FAT is not APFS and lists whole; case-sensitive APFS is, and ends its
+// listing at the short call. FAT keeps each file's extended attributes in a
+// "._" file beside it, so the files listed are those os.ReadDir lists.
+func TestAFATAndACaseSensitiveAPFSDirectoryListWhole(t *testing.T) {
+	for _, c := range []struct {
+		fs   string
+		apfs bool
+	}{{"MS-DOS", false}, {"Case-sensitive APFS", true}} {
+		dir := filepath.Join(mountedImage(t, c.fs), "sub")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		const files = 500
+		makeFiles(t, dir, files, shortName)
+		want, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, calls := bulkCalls(t, dir)
+		listsWhole(t, got, len(want), func(i int) string { return want[i].Name() })
+		if endCall := calls[len(calls)-1] == 0; endCall == c.apfs {
+			t.Errorf("%s: the calls returned %v records", c.fs, calls)
+		}
+		if got := readDir(t, dir); len(got) != files {
+			t.Errorf("%s: AppendDir listed %d files, want %d", c.fs, len(got), files)
+		}
+	}
+}
+
+// untilZero lists dir by calling getattrlistbulk until it returns 0.
+func untilZero(t *testing.T, dir string) []Entry {
+	t.Helper()
+	fd := openRaw(t, dir)
+	defer mustCloseRaw(t, fd)
+	buf := make([]byte, bufferBytes)
+	var got []Entry
+	for {
+		n, err := getattrlistbulk(int(fd), &requested, buf)
+		if errors.Is(err, syscall.EINTR) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return got
+		}
+		if got, _, err = parseRecords(got, buf, n, keepIDs); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// cjkName is k copies of one of eight three-byte characters: 255 of them,
+// 765 bytes, the longest name APFS takes, make the largest record, 864 bytes.
+func cjkName(i int) string {
+	return strings.Repeat(string(rune('中'+i/255)), i%255+1)
+}
+
+// Records of 104 to 864 bytes leave full calls up to 863 bytes free, so a
+// bound short of the largest record ends a listing early. APFS refuses a
+// name of 256 three-byte characters, which keeps the bound at 864.
+func TestAnAPFSDirectoryOfTheLongestNamesListsWhole(t *testing.T) {
+	dir := t.TempDir()
+	const files = 8 * 255
+	makeFiles(t, dir, files, cjkName)
+	got, calls := bulkCalls(t, dir)
+	listsWhole(t, got, files, cjkName)
+	if len(calls) < 2 || slices.Contains(calls, 0) {
+		t.Fatalf("the calls returned %v records, want several and none of 0", calls)
+	}
+	names := func(es []Entry) []string {
+		var s []string
+		for _, e := range es {
+			s = append(s, e.Name)
+		}
+		slices.Sort(s)
+		return s
+	}
+	if !slices.Equal(names(got), names(untilZero(t, dir))) {
+		t.Fatal("the listing differs from the one that calls until 0")
+	}
+	err := os.WriteFile(filepath.Join(dir, strings.Repeat("中", 256)), nil, 0o644)
+	if !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Fatalf("a name of 768 bytes: %v, want ENAMETOOLONG", err)
 	}
 }

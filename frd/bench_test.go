@@ -145,7 +145,7 @@ func BenchmarkParseRecords(b *testing.B) {
 	b.SetBytes(int64(len(buf)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := parseRecords(dst[:0], buf, len(rs), keepIDs); err != nil {
+		if _, _, err := parseRecords(dst[:0], buf, len(rs), keepIDs); err != nil {
 			b.Fatal(err)
 		}
 	}

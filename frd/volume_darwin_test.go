@@ -300,3 +300,71 @@ func BenchmarkDirLinks(b *testing.B) {
 		}
 	}
 }
+
+// The listing asks, with the capabilities, for the file system's name, and
+// keeps whether it is APFS.
+func TestTheListingKnowsWhichVolumesAreAPFS(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		dir  func() string
+		apfs bool
+	}{
+		{"the tests' volume", t.TempDir, true},
+		{"the system volume", func() string { return "/System/Library" }, true},
+		{"case-sensitive APFS", func() string { return mountedImage(t, "Case-sensitive APFS") }, true},
+		{"HFS+", func() string { return mountedImage(t, "HFS+") }, false},
+		{"FAT", func() string { return mountedImage(t, "MS-DOS") }, false},
+		{"devfs", func() string { return "/dev" }, false},
+	} {
+		fd := openRaw(t, c.dir())
+		v, err := askVolumeInfo(int(fd))
+		mustCloseRaw(t, fd)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if v.apfs != c.apfs {
+			t.Errorf("%s: apfs = %v, want %v", c.name, v.apfs, c.apfs)
+		}
+		if _, known := v.caps.PersistentIDs(); !known {
+			t.Errorf("%s: the capabilities are missing: %+v", c.name, v.caps)
+		}
+	}
+}
+
+// The type's name is read only where its reference places it within the
+// answer, and only "apfs" is APFS; the capabilities follow volumeFrom's rule.
+func TestTheFileSystemNameIsReadWithinTheAnswer(t *testing.T) {
+	caps := volCapabilities{capabilities: [4]uint32{volCapPersistentIDs}, valid: [4]uint32{volCapPersistentIDs}}
+	answer := func(length uint32, offset int32, size uint32, name string) volCapabilitiesAndType {
+		a := volCapabilitiesAndType{volCapabilities: caps, typeName: attrReference{offset: offset, length: size}}
+		a.length = length
+		copy(a.name[:], name)
+		return a
+	}
+	const full = uint32(unsafe.Sizeof(volCapabilitiesAndType{}))
+	const ref = int32(unsafe.Offsetof(volCapabilitiesAndType{}.name) - unsafe.Offsetof(volCapabilitiesAndType{}.typeName))
+	for name, c := range map[string]struct {
+		a    volCapabilitiesAndType
+		apfs bool
+	}{
+		"apfs":                           {answer(52, ref, 5, "apfs\x00"), true},
+		"hfs":                            {answer(52, ref, 4, "hfs\x00"), false},
+		"a longer name":                  {answer(52, ref, 6, "apfsx\x00"), false},
+		"no NUL":                         {answer(52, ref, 4, "apfs"), false},
+		"no type in the answer":          {answer(uint32(unsafe.Sizeof(volCapabilities{})), ref, 5, "apfs\x00"), false},
+		"a name past the answer":         {answer(48, ref, 5, "apfs\x00"), false},
+		"a name past the buffer":         {answer(full, ref+12, 5, "apfs\x00"), false},
+		"a name before its reference":    {answer(52, -4, 5, "apfs\x00"), false},
+		"a length the answer can't hold": {answer(52, ref, 1<<31, "apfs\x00"), false},
+		"an empty name":                  {answer(52, ref, 0, "apfs\x00"), false},
+	} {
+		v, err := volumeInfoFrom(c.a)
+		if err != nil || v.apfs != c.apfs || v.caps != (VolumeCaps{Capabilities: volCapPersistentIDs, Valid: volCapPersistentIDs}) {
+			t.Errorf("%s: volumeInfoFrom = %+v, %v; want apfs %v and the capabilities", name, v, err, c.apfs)
+		}
+	}
+	if _, err := volumeInfoFrom(answer(28, ref, 5, "apfs\x00")); !errors.Is(err, syscall.ENOTSUP) {
+		t.Errorf("an answer without the capabilities: %v, want ENOTSUP", err)
+	}
+}

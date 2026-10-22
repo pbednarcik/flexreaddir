@@ -88,7 +88,7 @@ const every = attrName | attrError | attrFsid | attrObjtype | attrModtime | attr
 
 func TestARegularFileCarriesItsSizeAndModificationTime(t *testing.T) {
 	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, sec: 1700000000, nsec: 123456789, size: 42})
-	got, err := parseRecords(nil, buf, 1, keepIDs)
+	got, _, err := parseRecords(nil, buf, 1, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestARegularFileCarriesItsSizeAndModificationTime(t *testing.T) {
 
 func TestARegularFileCarriesItsChangeTimeAndFileID(t *testing.T) {
 	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, sec: 1700000000, chg: 1700000001, chgNsec: 987654321, fileID: 1 << 40, size: 42})
-	got, err := parseRecords(nil, buf, 1, keepIDs)
+	got, _, err := parseRecords(nil, buf, 1, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestARegularFileCarriesItsChangeTimeAndFileID(t *testing.T) {
 // modification time in its place, and so does the listing.
 func TestAFileWithoutAChangeTimeTakesItsModificationTime(t *testing.T) {
 	buf := records(rec{common: every &^ attrChgtime, file: attrDataLength, name: "a.go", objtype: typeRegular, sec: 1700000000, nsec: 5, fileID: 9, size: 42})
-	got, err := parseRecords(nil, buf, 1, keepIDs)
+	got, _, err := parseRecords(nil, buf, 1, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAFileOnAVolumeWhoseIDsDoNotPersistHasNoFileID(t *testing.T) {
 		rec{common: every, file: attrDataLength, name: "fat.go", fsid: 7, objtype: typeRegular, sec: 1, chg: 2, fileID: 9, size: 3},
 		rec{common: every, file: attrDataLength, name: "apfs.go", fsid: 8, objtype: typeRegular, sec: 1, chg: 2, fileID: 9, size: 3},
 	)
-	got, err := parseRecords(nil, buf, 2, func(fsid uint64) bool { return fsid != 7 })
+	got, _, err := parseRecords(nil, buf, 2, func(fsid uint64) bool { return fsid != 7 })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestTheVolumeIsAskedOnceForABufferOfItsFiles(t *testing.T) {
 		rs = append(rs, rec{common: every, file: attrDataLength, name: name, fsid: 7, objtype: typeRegular, fileID: 1})
 	}
 	asked := 0
-	if _, err := parseRecords(nil, records(rs...), 3, func(uint64) bool { asked++; return true }); err != nil {
+	if _, _, err := parseRecords(nil, records(rs...), 3, func(uint64) bool { asked++; return true }); err != nil {
 		t.Fatal(err)
 	}
 	if asked != 1 {
@@ -160,9 +160,51 @@ func TestTheVolumeIsAskedOnceForABufferOfItsFiles(t *testing.T) {
 	}
 }
 
+// The first record of a buffer asks for its volume whatever its type, so a
+// listing of directories alone learns its volume too; a later regular file of
+// the same volume asks nothing more.
+func TestTheFirstRecordOfABufferAsksForTheVolume(t *testing.T) {
+	for name, rs := range map[string][]rec{
+		"directories": {
+			{common: every, name: "d", fsid: 7, objtype: typeDir},
+			{common: every, name: "e", fsid: 7, objtype: typeDir},
+		},
+		"a directory, then a file": {
+			{common: every, name: "d", fsid: 7, objtype: typeDir},
+			{common: every, file: attrDataLength, name: "f", fsid: 7, objtype: typeRegular, fileID: 1},
+		},
+	} {
+		var asked []uint64
+		got, _, err := parseRecords(nil, records(rs...), len(rs), func(fsid uint64) bool { asked = append(asked, fsid); return true })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(asked, []uint64{7}) || len(got) != len(rs) {
+			t.Errorf("%s: asked for %v, listed %d; want 7 once and %d", name, asked, len(got), len(rs))
+		}
+	}
+}
+
+// The decode says where its last record ended, a skipped entry's included,
+// so the caller knows how much of the buffer the call left free.
+func TestParseRecordsSaysWhereTheRecordsEnded(t *testing.T) {
+	recs := records(
+		rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1},
+		rec{common: attrName | attrError, errno: errnoNotExist, name: "gone"},
+	)
+	buf := append(recs, make([]byte, 100)...)
+	got, end, err := parseRecords(nil, buf, 2, keepIDs)
+	if err != nil || len(got) != 1 || end != len(recs) {
+		t.Fatalf("parseRecords = %d entries, end %d, %v; want 1, %d, nil", len(got), end, err, len(recs))
+	}
+	if _, end, _ := parseRecords(nil, buf, 0, keepIDs); end != 0 {
+		t.Errorf("no records: end %d, want 0", end)
+	}
+}
+
 func TestOnlyARegularFileCarriesASizeAndATime(t *testing.T) {
 	buf := records(rec{common: every, name: "d", objtype: typeDir, sec: 1700000000, nsec: 1, chg: 1700000000, fileID: 7})
-	got, err := parseRecords(nil, buf, 1, keepIDs)
+	got, _, err := parseRecords(nil, buf, 1, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +224,7 @@ func TestEveryObjectTypeMapsToTheModeADirEntryWouldReport(t *testing.T) {
 		typeBlock:   fs.ModeDevice,
 		0:           fs.ModeIrregular,
 	} {
-		got, err := parseRecords(nil, records(rec{common: every, name: "x", objtype: objtype}), 1, keepIDs)
+		got, _, err := parseRecords(nil, records(rec{common: every, name: "x", objtype: objtype}), 1, keepIDs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +239,7 @@ func TestAnEntryRemovedAfterTheListingIsSkipped(t *testing.T) {
 		rec{common: attrName | attrError, errno: errnoNotExist, name: "gone"},
 		rec{common: every, file: attrDataLength, name: "kept", objtype: typeRegular, size: 1},
 	)
-	got, err := parseRecords(nil, buf, 2, keepIDs)
+	got, _, err := parseRecords(nil, buf, 2, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +250,7 @@ func TestAnEntryRemovedAfterTheListingIsSkipped(t *testing.T) {
 
 func TestAnyOtherEntryErrorFailsTheListingNamingTheEntry(t *testing.T) {
 	const eacces = 13
-	_, err := parseRecords(nil, records(rec{common: attrName | attrError, errno: eacces, name: "locked"}), 1, keepIDs)
+	_, _, err := parseRecords(nil, records(rec{common: attrName | attrError, errno: eacces, name: "locked"}), 1, keepIDs)
 	pe, ok := errors.AsType[*os.PathError](err)
 	if !ok || pe.Op != bulkOp || pe.Path != "locked" || !errors.Is(err, syscall.Errno(eacces)) {
 		t.Fatalf("parseRecords error = %v, want a getattrlistbulk *os.PathError naming locked with errno %d", err, eacces)
@@ -219,14 +261,14 @@ func TestAnyOtherEntryErrorFailsTheListingNamingTheEntry(t *testing.T) {
 // stands alone, and the listing names the directory.
 func TestAnEntryErrorWithoutANameIsTheBareErrno(t *testing.T) {
 	const eacces = 13
-	_, err := parseRecords(nil, records(rec{common: attrError, errno: eacces}), 1, keepIDs)
+	_, _, err := parseRecords(nil, records(rec{common: attrError, errno: eacces}), 1, keepIDs)
 	if _, ok := errors.AsType[*os.PathError](err); ok || !errors.Is(err, syscall.Errno(eacces)) {
 		t.Fatalf("parseRecords error = %v, want the bare errno %d", err, eacces)
 	}
 }
 
 func TestParseAppendsToWhatItIsGiven(t *testing.T) {
-	got, err := parseRecords([]Entry{{Name: "first"}}, records(rec{common: every, name: "second", objtype: typeDir}), 1, keepIDs)
+	got, _, err := parseRecords([]Entry{{Name: "first"}}, records(rec{common: every, name: "second", objtype: typeDir}), 1, keepIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +316,7 @@ func TestAMalformedBufferIsAnErrorNotAPanic(t *testing.T) {
 		"a name without its NUL":           {unterminated, 1},
 		"a name inside the fixed fields":   {intoFixed, 1},
 	} {
-		if _, err := parseRecords(nil, c.buf, c.n, keepIDs); !errors.Is(err, ErrMalformed) {
+		if _, _, err := parseRecords(nil, c.buf, c.n, keepIDs); !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: parseRecords error = %v, want ErrMalformed", name, err)
 		}
 	}
@@ -309,7 +351,7 @@ func TestACountTheBufferCannotHoldDoesNotSizeTheEntries(t *testing.T) {
 	buf := records(rec{common: every, file: attrDataLength, name: "a.go", objtype: typeRegular, size: 1})
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	_, err := parseRecords(nil, buf, 1<<26, keepIDs)
+	_, _, err := parseRecords(nil, buf, 1<<26, keepIDs)
 	runtime.ReadMemStats(&after)
 	if !errors.Is(err, ErrMalformed) {
 		t.Errorf("parseRecords error = %v, want ErrMalformed", err)
@@ -320,7 +362,7 @@ func TestACountTheBufferCannotHoldDoesNotSizeTheEntries(t *testing.T) {
 }
 
 func TestANegativeCountListsNothing(t *testing.T) {
-	got, err := parseRecords(nil, []byte("0"), -60, keepIDs)
+	got, _, err := parseRecords(nil, []byte("0"), -60, keepIDs)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("parseRecords = %v, %v; want nothing", got, err)
 	}

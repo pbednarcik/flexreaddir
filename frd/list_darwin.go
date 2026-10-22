@@ -4,6 +4,7 @@ package frd
 
 import (
 	"errors"
+	"math"
 	"os"
 	"runtime"
 	"sync"
@@ -40,19 +41,77 @@ func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 	if names {
 		return readNames(dst, fd, buf)
 	}
-	persistent := func(fsid uint64) bool { return persistentIDs(fd, fsid) }
+	return readBulk(dst, fd, buf, getattrlistbulk)
+}
+
+// readBulk lists fd by bulk, which is getattrlistbulk; the tests pass one
+// that counts the calls.
+func readBulk(dst []Entry, fd int, buf []byte, bulk func(int, *attrlist, []byte) (int, error)) ([]Entry, error) {
+	var apfs bool
+	persistent := func(fsid uint64) bool {
+		v, ok := volumeFor(fd, fsid)
+		apfs = v.apfs
+		return ok && persists(v.caps)
+	}
 	for {
-		n, err := getattrlistbulk(fd, &requested, buf)
+		n, err := bulk(fd, &requested, buf)
 		if errors.Is(err, syscall.EINTR) {
 			continue
 		}
 		if err != nil || n == 0 {
 			return dst, err
 		}
-		if dst, err = parseRecords(dst, buf, n, persistent); err != nil {
+		var end int
+		if dst, end, err = parseRecords(dst, buf, n, persistent); err != nil {
 			return dst, err
 		}
+		// APFS is seen to pack records while one more fits, which
+		// getattrlistbulk(2) does not promise, so a call that left room for
+		// the largest stopped at the directory's end, and the next would
+		// return 0 from the end the descriptor keeps. Elsewhere, HFS+ and FAT
+		// among them, a call can return a short batch before the end.
+		if apfs && len(buf)-end >= largestRecord {
+			return dst, nil
+		}
 	}
+}
+
+// largestRecord is the most bytes one record of requested takes.
+var largestRecord = recordBound(requested)
+
+// recordBound is the most bytes one getattrlistbulk record of al can take:
+// the length and the returned groups, each fixed-size attribute al asks for,
+// and a name of at most NAME_MAX * 3 + 1 bytes with its NUL (getattrlist(2)),
+// padded to 4, the whole padded to 8. An attribute it cannot size gives a
+// bound no buffer meets.
+func recordBound(al attrlist) int {
+	const nameMax = 255 // NAME_MAX
+	sizes := [...]struct {
+		common, file uint32
+		bytes        int
+	}{
+		{attrReturned, 0, 0}, // the groups, counted in recordHeader
+		{attrError, 0, 4},
+		{attrName, 0, 8 + (nameMax*3+1+3)&^3},
+		{attrFsid, 0, 8},
+		{attrObjtype, 0, 4},
+		{attrModtime, 0, 16},
+		{attrChgtime, 0, 16},
+		{attrFileID, 0, 8},
+		{0, attrDataLength, 8},
+	}
+	bound, common, file := recordHeader, al.common, al.file
+	for _, s := range sizes {
+		if common&s.common != 0 || file&s.file != 0 {
+			bound += s.bytes
+			common &^= s.common
+			file &^= s.file
+		}
+	}
+	if common|file|al.volume|al.directory|al.fork != 0 {
+		return math.MaxInt
+	}
+	return (bound + 7) &^ 7
 }
 
 // readNames lists fd by getdirentries64, the call readdir makes, which reads
@@ -112,28 +171,31 @@ func notDir(fd int) bool {
 	return unix.Fstat(fd, &st) == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR
 }
 
-// volumes holds, by fsid, the capabilities of each volume seen, whose
-// persistent-ids bit decides whether its file ids are listed: FAT32, exFAT
-// and NFS clear VOL_CAP_FMT_PERSISTENTOBJECTIDS, and FSKit gives an empty FAT
-// file a new id on every listing. The answer is kept for the life of the
-// process, so a later volume given the same fsid takes it.
+// volumes holds, by fsid, the volumeInfo of each volume seen. The
+// capabilities' persistent-ids bit decides whether its file ids are listed:
+// FAT32, exFAT and NFS clear VOL_CAP_FMT_PERSISTENTOBJECTIDS, and FSKit gives
+// an empty FAT file a new id on every listing. The answer is kept for the life
+// of the process, so a later volume given the same fsid takes it.
 var volumes sync.Map
 
-// persistentIDs reports whether the volume fsid keeps its file ids, asking
-// the kernel once per volume through the directory fd. Only a regular file's
-// record asks, and a regular file lies on its directory's volume: a mount
-// point is a directory. A volume that cannot be asked is taken not to keep
-// them, and is not remembered, so the next listing asks again.
-func persistentIDs(fd int, fsid uint64) bool {
-	if caps, ok := volumes.Load(fsid); ok {
-		return persists(caps.(VolumeCaps))
+// volumeFor answers for the volume fsid, asking the kernel once per volume
+// through the directory fd. The records of one listing carry one fsid, a
+// mount point's included, which getattrlistbulk describes as the directory
+// it covers; on the sealed system volume it is the APFS volume group's,
+// shared with the Data volume. Its high word is the file system's type
+// number, statfs's f_type, on every volume seen, so a volume given an
+// earlier one's fsid is of the same type. A volume that cannot be asked gives
+// no answer, ok false, and is not remembered, so the next listing asks again.
+func volumeFor(fd int, fsid uint64) (v volumeInfo, ok bool) {
+	if v, ok := volumes.Load(fsid); ok {
+		return v.(volumeInfo), true
 	}
-	caps, err := volume(fd)
+	v, err := askVolumeInfo(fd)
 	if err != nil {
-		return false
+		return volumeInfo{}, false
 	}
-	volumes.LoadOrStore(fsid, caps)
-	return persists(caps)
+	volumes.LoadOrStore(fsid, v)
+	return v, true
 }
 
 // persists reads VOL_CAP_FMT_PERSISTENTOBJECTIDS; a volume whose answer is

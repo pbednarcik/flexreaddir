@@ -55,15 +55,19 @@ const volumeOp = "fgetattrlist"
 // returning its errno bare.
 func volume(fd int) (VolumeCaps, error) {
 	var caps volCapabilities
+	if err := askVolume(fd, &volumeCapabilities, &caps); err != nil {
+		return VolumeCaps{}, err
+	}
+	return volumeFrom(caps)
+}
+
+// askVolume fills got with the answer to al about the volume holding fd,
+// retrying EINTR, and returns the errno bare.
+func askVolume[T volCapabilities | volCapabilitiesAndType](fd int, al *attrlist, got *T) error {
 	for {
-		err := fgetattrlist(fd, &volumeCapabilities, unsafe.Pointer(&caps), unsafe.Sizeof(caps))
-		if errors.Is(err, syscall.EINTR) {
-			continue
+		if err := fgetattrlist(fd, al, unsafe.Pointer(got), unsafe.Sizeof(*got)); !errors.Is(err, syscall.EINTR) {
+			return err
 		}
-		if err != nil {
-			return VolumeCaps{}, err
-		}
-		return volumeFrom(caps)
 	}
 }
 
@@ -80,6 +84,59 @@ func volumeFrom(caps volCapabilities) (VolumeCaps, error) {
 }
 
 var volumeCapabilities = attrlist{bitmapCount: 5, volume: attrVolInfo | attrVolCapabilities}
+
+// volumeInfo is what a listing keeps of a volume: its capabilities, and
+// whether it is APFS.
+type volumeInfo struct {
+	caps VolumeCaps
+	apfs bool
+}
+
+// askVolumeInfo asks, in one fgetattrlist on fd, for the capabilities Volume
+// asks for and the name of the volume's file system, returning its errno
+// bare. Volume's own call asks for the capabilities alone.
+func askVolumeInfo(fd int) (volumeInfo, error) {
+	var got volCapabilitiesAndType
+	if err := askVolume(fd, &volumeCapabilitiesAndType, &got); err != nil {
+		return volumeInfo{}, err
+	}
+	return volumeInfoFrom(got)
+}
+
+// volumeInfoFrom reads the capabilities by volumeFrom's rule: an answer that
+// left them out holds at most the reference and a 16-byte name, 28 bytes,
+// short of them. The volume is APFS when the name the reference places,
+// from the reference's own offset, within the answer's length reads "apfs".
+func volumeInfoFrom(got volCapabilitiesAndType) (volumeInfo, error) {
+	caps, err := volumeFrom(got.volCapabilities)
+	if err != nil {
+		return volumeInfo{}, err
+	}
+	ref, at := int64(unsafe.Offsetof(got.typeName)), int64(unsafe.Offsetof(got.name))
+	start := ref + int64(got.typeName.offset) - at
+	end := start + int64(got.typeName.length)
+	apfs := start >= 0 && end <= min(int64(got.length)-at, int64(len(got.name))) &&
+		string(got.name[start:end]) == "apfs\x00"
+	return volumeInfo{caps: caps, apfs: apfs}, nil
+}
+
+var volumeCapabilitiesAndType = attrlist{bitmapCount: 5, volume: attrVolInfo | attrVolCapabilities | attrVolFSTypeName}
+
+// volCapabilitiesAndType is the answer to volumeCapabilitiesAndType: the
+// length and the capabilities, then ATTR_VOL_FSTYPENAME's attrreference_t
+// and room for the name it refers to, MFSTYPENAMELEN bytes with its NUL.
+type volCapabilitiesAndType struct {
+	volCapabilities
+	typeName attrReference
+	name     [16]byte
+}
+
+// attrReference is attrreference_t from <sys/attr.h>: where the attribute's
+// bytes start, from the reference itself, and how many there are.
+type attrReference struct {
+	offset int32
+	length uint32
+}
 
 // volCapabilities is the length getattrlist returns followed by
 // vol_capabilities_attr_t from <sys/attr.h>.
@@ -150,6 +207,7 @@ type dirLinkCount struct {
 const (
 	attrVolInfo           = 0x80000000 // ATTR_VOL_INFO
 	attrVolCapabilities   = 0x00020000 // ATTR_VOL_CAPABILITIES
+	attrVolFSTypeName     = 0x00100000 // ATTR_VOL_FSTYPENAME
 	volCapabilitiesFormat = 0          // VOL_CAPABILITIES_FORMAT
 	volCapPersistentIDs   = 0x00000001 // VOL_CAP_FMT_PERSISTENTOBJECTIDS
 	volCapCaseSensitive   = 0x00000100 // VOL_CAP_FMT_CASE_SENSITIVE

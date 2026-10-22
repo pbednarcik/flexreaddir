@@ -63,21 +63,23 @@ func vtypeMode(objtype uint32) fs.FileMode {
 
 // parseRecords appends an Entry for each of the n getattrlistbulk records
 // packed in buf, with one allocation for their names and at most one to grow
-// dst. A regular file keeps its id only where persistent says its volume's ids
-// persist, asked once for each run of records from one volume. On a malformed
-// record it returns the entries before it with the error.
-func parseRecords(dst []Entry, buf []byte, n int, persistent func(fsid uint64) bool) ([]Entry, error) {
+// dst, and returns the offset in buf at which the records ended. A regular
+// file keeps its id only where persistent says its volume's ids persist,
+// asked for the buffer's first record, whatever its type, and again for a
+// regular file of another volume. On a malformed record it returns the
+// entries before it with the error.
+func parseRecords(dst []Entry, buf []byte, n int, persistent func(fsid uint64) bool) ([]Entry, int, error) {
 	dst = slices.Grow(dst, max(0, min(n, len(buf)/recordHeader)))
 	var names nameBlock
 	names.grow(nameBytes(buf, n))
 	var fsid uint64
 	asked, keep := false, false
-	err := eachRecord(buf, n, func(r record) {
+	end, err := eachRecord(buf, n, func(r record) {
+		if !asked || r.mode.IsRegular() && r.fsid != fsid {
+			fsid, asked, keep = r.fsid, true, persistent(r.fsid)
+		}
 		e := Entry{Name: names.add(r.name), Type: r.mode}
 		if r.mode.IsRegular() {
-			if !asked || r.fsid != fsid {
-				fsid, asked, keep = r.fsid, true, persistent(r.fsid)
-			}
 			e.Size, e.ModTimeNanos, e.ChangeTimeNanos = r.size, r.modTime, r.chgTime
 			if keep {
 				e.FileID = r.fileID
@@ -85,7 +87,7 @@ func parseRecords(dst []Entry, buf []byte, n int, persistent func(fsid uint64) b
 		}
 		dst = append(dst, e)
 	})
-	return dst, err
+	return dst, end, err
 }
 
 // nameBytes sizes the names of the n records in buf from the lengths their
@@ -131,24 +133,25 @@ type record struct {
 	fileID  uint64
 }
 
-// eachRecord calls visit for the n records in buf. It skips an entry removed
-// before its attributes were read and stops at any other entry error, as an
-// *os.PathError naming the entry when the kernel returned its name.
+// eachRecord calls visit for the n records in buf and returns the offset at
+// which they ended. It skips an entry removed before its attributes were
+// read and stops at any other entry error, as an *os.PathError naming the
+// entry when the kernel returned its name.
 // Attributes follow the returned groups in bit order, except that an entry's
 // error comes first; an attribute the kernel could not supply is absent, and
 // the returned groups say so. A name is NUL-terminated, holds no other NUL,
 // and lies after the fixed-size attributes; every entry without an error has
 // one.
-func eachRecord(buf []byte, n int, visit func(record)) error {
+func eachRecord(buf []byte, n int, visit func(record)) (int, error) {
 	le := binary.LittleEndian // every Mac is little-endian
 	at := 0
 	for range n {
 		if len(buf)-at < recordHeader {
-			return ErrMalformed
+			return at, ErrMalformed
 		}
 		length := int(le.Uint32(buf[at:]))
 		if length < recordHeader || length > len(buf)-at {
-			return ErrMalformed
+			return at, ErrMalformed
 		}
 		rec := buf[at : at+length]
 		at += length
@@ -166,7 +169,7 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 		if common&attrError != 0 {
 			f, ok := field(4)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			errno = le.Uint32(f)
 		}
@@ -179,28 +182,28 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 			ref := p
 			f, ok := field(8)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			nameStart = int64(ref) + int64(int32(le.Uint32(f)))
 			size := int64(le.Uint32(f[4:])) // the length counts the NUL
 			if size < 2 || nameStart < int64(p) || nameStart+size > int64(len(rec)) {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.name = rec[nameStart : nameStart+size-1]
 			if rec[nameStart+size-1] != 0 || bytes.IndexByte(r.name, 0) >= 0 {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 		}
 		if errno != 0 {
 			if r.name == nil {
-				return syscall.Errno(errno)
+				return at, syscall.Errno(errno)
 			}
-			return &os.PathError{Op: bulkOp, Path: string(r.name), Err: syscall.Errno(errno)}
+			return at, &os.PathError{Op: bulkOp, Path: string(r.name), Err: syscall.Errno(errno)}
 		}
 		if common&attrFsid != 0 {
 			f, ok := field(8)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.fsid = le.Uint64(f)
 		}
@@ -208,21 +211,21 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 		if common&attrObjtype != 0 {
 			f, ok := field(4)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.mode = vtypeMode(le.Uint32(f))
 		}
 		if common&attrModtime != 0 {
 			f, ok := field(16)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.modTime = int64(le.Uint64(f))*1e9 + int64(le.Uint64(f[8:]))
 		}
 		if common&attrChgtime != 0 {
 			f, ok := field(16)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.chgTime = int64(le.Uint64(f))*1e9 + int64(le.Uint64(f[8:]))
 		} else {
@@ -231,21 +234,21 @@ func eachRecord(buf []byte, n int, visit func(record)) error {
 		if common&attrFileID != 0 {
 			f, ok := field(8)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.fileID = le.Uint64(f)
 		}
 		if file&attrDataLength != 0 {
 			f, ok := field(8)
 			if !ok {
-				return ErrMalformed
+				return at, ErrMalformed
 			}
 			r.size = int64(le.Uint64(f))
 		}
 		if r.name == nil || nameStart < int64(p) {
-			return ErrMalformed
+			return at, ErrMalformed
 		}
 		visit(r)
 	}
-	return nil
+	return at, nil
 }
