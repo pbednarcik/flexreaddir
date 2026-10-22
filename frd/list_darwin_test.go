@@ -34,26 +34,7 @@ func TestADirectoryThatCannotBeSearchedIsAPathErrorNamingIt(t *testing.T) {
 // every listing), so it reports them as not persistent and the listing gives
 // none. The test attaches a FAT disk image with hdiutil.
 func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("attaches a disk image")
-	}
-	hdiutil, err := exec.LookPath("hdiutil")
-	if err != nil {
-		t.Skip(err)
-	}
-	dir := t.TempDir()
-	img, mnt := filepath.Join(dir, "fat.dmg"), filepath.Join(dir, "mnt")
-	if out, err := exec.Command(hdiutil, "create", "-quiet", "-size", "8m", "-fs", "MS-DOS", "-volname", "FRD", img).CombinedOutput(); err != nil {
-		t.Skipf("hdiutil create: %v: %s", err, out)
-	}
-	if out, err := exec.Command(hdiutil, "attach", "-quiet", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil {
-		t.Skipf("hdiutil attach: %v: %s", err, out)
-	}
-	t.Cleanup(func() {
-		if out, err := exec.Command(hdiutil, "detach", "-quiet", "-force", mnt).CombinedOutput(); err != nil {
-			t.Errorf("hdiutil detach: %v: %s", err, out)
-		}
-	})
+	mnt := fatImage(t)
 	sub := filepath.Join(mnt, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -78,6 +59,34 @@ func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
 	}
 }
 
+// fatImage makes an 8 MB FAT disk image with hdiutil, attaches it for the
+// test's life and returns its mount point. It skips the test under -short,
+// and where hdiutil is missing or fails.
+func fatImage(t *testing.T) string {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("attaches a disk image")
+	}
+	hdiutil, err := exec.LookPath("hdiutil")
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	img, mnt := filepath.Join(dir, "fat.dmg"), filepath.Join(dir, "mnt")
+	if out, err := exec.Command(hdiutil, "create", "-quiet", "-size", "8m", "-fs", "MS-DOS", "-volname", "FRD", img).CombinedOutput(); err != nil {
+		t.Skipf("hdiutil create: %v: %s", err, out)
+	}
+	if out, err := exec.Command(hdiutil, "attach", "-quiet", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil {
+		t.Skipf("hdiutil attach: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		if out, err := exec.Command(hdiutil, "detach", "-quiet", "-force", mnt).CombinedOutput(); err != nil {
+			t.Errorf("hdiutil detach: %v: %s", err, out)
+		}
+	})
+	return mnt
+}
+
 func TestTheVolumeCapabilitiesSayWhetherIDsPersist(t *testing.T) {
 	for name, c := range map[string]struct {
 		capabilities, valid uint32
@@ -87,7 +96,7 @@ func TestTheVolumeCapabilitiesSayWhetherIDsPersist(t *testing.T) {
 		"valid and clear": {0, volCapPersistentIDs, false},
 		"not valid":       {0, 0, true},
 	} {
-		caps := volCapabilities{capabilities: [4]uint32{c.capabilities}, valid: [4]uint32{c.valid}}
+		caps := VolumeCaps{Capabilities: c.capabilities, Valid: c.valid}
 		if got := persists(caps); got != c.want {
 			t.Errorf("%s: persists = %v, want %v", name, got, c.want)
 		}
@@ -103,6 +112,27 @@ func TestAVolumeThatCannotBeAskedGivesNoIDsAndIsNotRemembered(t *testing.T) {
 	}
 	if _, remembered := volumes.Load(uint64(fsid)); remembered {
 		t.Fatal("the failed answer was cached")
+	}
+}
+
+// A volume asked once is remembered whole, so a later question about any
+// other capability needs no second call.
+func TestTheCacheHoldsTheWholeAnswer(t *testing.T) {
+	const fsid = 1<<63 | 43
+	fd := openRaw(t, t.TempDir())
+	defer mustCloseRaw(t, fd)
+	volumes.Delete(uint64(fsid))
+	defer volumes.Delete(uint64(fsid))
+	if !persistentIDs(int(fd), fsid) {
+		t.Fatal("the tests' volume keeps its ids")
+	}
+	v, ok := volumes.Load(uint64(fsid))
+	caps, isCaps := v.(VolumeCaps)
+	if !ok || !isCaps {
+		t.Fatalf("cached %T %v, want a VolumeCaps", v, v)
+	}
+	if set, known := caps.CaseSensitive(); set || !known {
+		t.Errorf("the cached answer lost the case bit: %v, %v", set, known)
 	}
 }
 

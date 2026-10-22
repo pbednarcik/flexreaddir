@@ -112,75 +112,35 @@ func notDir(fd int) bool {
 	return unix.Fstat(fd, &st) == nil && st.Mode&unix.S_IFMT != unix.S_IFDIR
 }
 
-// volumes holds, by fsid, whether each volume seen keeps its file ids:
-// FAT32, exFAT and NFS clear VOL_CAP_FMT_PERSISTENTOBJECTIDS, and FSKit gives
-// an empty FAT file a new id on every listing. The answer is kept for the
-// life of the process, so a later volume given the same fsid takes it.
+// volumes holds, by fsid, the capabilities of each volume seen, whose
+// persistent-ids bit decides whether its file ids are listed: FAT32, exFAT
+// and NFS clear VOL_CAP_FMT_PERSISTENTOBJECTIDS, and FSKit gives an empty FAT
+// file a new id on every listing. The answer is kept for the life of the
+// process, so a later volume given the same fsid takes it.
 var volumes sync.Map
 
 // persistentIDs reports whether the volume fsid keeps its file ids, asking
 // the kernel once per volume through the directory fd. Only a regular file's
 // record asks, and a regular file lies on its directory's volume: a mount
-// point is a directory.
+// point is a directory. A volume that cannot be asked is taken not to keep
+// them, and is not remembered, so the next listing asks again.
 func persistentIDs(fd int, fsid uint64) bool {
-	if keep, ok := volumes.Load(fsid); ok {
-		return keep.(bool)
+	if caps, ok := volumes.Load(fsid); ok {
+		return persists(caps.(VolumeCaps))
 	}
-	keep, known := keepsIDs(fd)
-	if known {
-		volumes.LoadOrStore(fsid, keep)
+	caps, err := volume(fd)
+	if err != nil {
+		return false
 	}
-	return keep
-}
-
-// keepsIDs asks the kernel whether the volume holding fd keeps its file ids.
-// A volume that cannot be asked is taken not to, and known is false, so the
-// next listing asks again.
-func keepsIDs(fd int) (keep, known bool) {
-	var caps volCapabilities
-	for {
-		err := fgetattrlist(fd, &volumeCapabilities, unsafe.Pointer(&caps), unsafe.Sizeof(caps))
-		if err == nil {
-			return persists(caps), true
-		}
-		if !errors.Is(err, syscall.EINTR) {
-			return false, false
-		}
-	}
+	volumes.LoadOrStore(fsid, caps)
+	return persists(caps)
 }
 
 // persists reads VOL_CAP_FMT_PERSISTENTOBJECTIDS; a volume whose answer is
 // not valid keeps its ids.
-func persists(caps volCapabilities) bool {
-	valid := caps.valid[volCapabilitiesFormat]
-	return valid&volCapPersistentIDs == 0 || valid&caps.capabilities[volCapabilitiesFormat]&volCapPersistentIDs != 0
-}
-
-var volumeCapabilities = attrlist{bitmapCount: 5, volume: attrVolInfo | attrVolCapabilities}
-
-// volCapabilities is the length getattrlist returns followed by
-// vol_capabilities_attr_t from <sys/attr.h>.
-type volCapabilities struct {
-	length       uint32
-	capabilities [4]uint32
-	valid        [4]uint32
-}
-
-const (
-	attrVolInfo           = 0x80000000 // ATTR_VOL_INFO
-	attrVolCapabilities   = 0x00020000 // ATTR_VOL_CAPABILITIES
-	volCapabilitiesFormat = 0          // VOL_CAPABILITIES_FORMAT
-	volCapPersistentIDs   = 0x00000001 // VOL_CAP_FMT_PERSISTENTOBJECTIDS
-)
-
-func fgetattrlist(fd int, al *attrlist, buf unsafe.Pointer, size uintptr) error {
-	_, _, errno := syscall_syscall6(libc_fgetattrlist_trampoline_addr,
-		uintptr(fd), uintptr(unsafe.Pointer(al)), uintptr(buf), size, 0, 0)
-	runtime.KeepAlive(buf)
-	if errno != 0 {
-		return errno
-	}
-	return nil
+func persists(caps VolumeCaps) bool {
+	set, known := caps.PersistentIDs()
+	return !known || set
 }
 
 func getattrlistbulk(fd int, al *attrlist, buf []byte) (int, error) {
