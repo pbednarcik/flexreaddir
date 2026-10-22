@@ -2,15 +2,19 @@ package frd
 
 import (
 	"os"
+	"sync"
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 // listDir lists name through a bare handle. syscall.Open is the open os.Open
-// makes; an os.File would add a GetFileType call, two allocations and a
-// finalizer that the listing never uses. A name of 248 bytes or more goes
-// through os.Open, which lengthens it past MAX_PATH where Windows needs it.
+// makes where the process can use long paths; an os.File would add a
+// GetFileType call, two allocations and a finalizer that the listing never
+// uses. Elsewhere every name goes through os.Open, which may add the \\?\
+// prefix.
 func listDir(name string) ([]Entry, error) {
-	if name == "" || len(name) >= 248 {
+	if !longPaths() {
 		return listDirFile(name)
 	}
 	h, err := syscall.Open(name, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
@@ -21,11 +25,26 @@ func listDir(name string) ([]Entry, error) {
 	l := listers.Get().(*Lister)
 	entries, err := l.appendHandle([]Entry{}, uintptr(h), name)
 	listers.Put(l)
-	if err != nil {
-		var fi syscall.ByHandleFileInformation
-		if syscall.GetFileInformationByHandle(h, &fi) == nil && fi.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY == 0 {
-			err = notADirectory(name)
-		}
+	if err != nil && notDir(h) {
+		err = notADirectory(name)
 	}
 	return entries, err
 }
+
+// notDir reports whether h is open on something other than a directory: a
+// device such as NUL or a pipe, or a file.
+func notDir(h syscall.Handle) bool {
+	if t, err := syscall.GetFileType(h); err == nil && t != syscall.FILE_TYPE_DISK {
+		return true
+	}
+	var fi syscall.ByHandleFileInformation
+	return syscall.GetFileInformationByHandle(h, &fi) == nil && fi.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY == 0
+}
+
+// longPaths is the runtime's test for opting the process into long paths
+// (runtime/os_windows.go): Windows 10 build 15063 or later. From there on
+// os.Open hands a name to CreateFile unchanged.
+var longPaths = sync.OnceValue(func() bool {
+	v := windows.RtlGetVersion()
+	return !(v.MajorVersion < 10 || v.MajorVersion == 10 && v.MinorVersion == 0 && v.BuildNumber < 15063)
+})
