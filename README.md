@@ -126,7 +126,7 @@ output and a line about the machine would be very welcome.
 
 ## API
 
-Nine names. Full documentation and runnable examples, including a tree walk,
+Twelve names. Full documentation and runnable examples, including a tree walk,
 are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples).
 
 | Name | What it does |
@@ -134,6 +134,9 @@ are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg
 | [`ReadDir`](#readdir) | Lists a directory by name, sorted as `os.ReadDir` sorts. |
 | [`AppendDir`](#appenddir) | Lists an open directory, appending to a slice you reuse. |
 | [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles, and names and types only with `Names` set. |
+| [`Volume`](#volume) | Asks what the volume holding a descriptor can do: persistent file ids, case sensitivity, directory hard links. macOS only. |
+| [`VolumeCaps`](#volume) | The volume's format capabilities, each bit as (set, known). |
+| [`DirLinks`](#dirlinks) | A directory's link count. macOS only. |
 | [`Entry`](#entry) | One entry: name, type, size, times and file id. |
 | [`Entry.ModTime`](#entrymodtime) | The modification time as a `time.Time`. |
 | [`CompareName`, `SortByName`](#comparename-and-sortbyname) | Byte order by name, the order `os.ReadDir` returns. |
@@ -314,6 +317,103 @@ wrapping it in an `os.File`:
 > walk against 19.6 MiB with the function `AppendDir` (3.4 against 8.6 MiB on
 > macOS, where the collector setting changes little).
 
+### `Volume`
+
+```go
+func Volume(fd uintptr) (VolumeCaps, error)
+
+type VolumeCaps struct {
+	Capabilities uint32 // VOL_CAPABILITIES_FORMAT, as reported
+	Valid        uint32 // the bits of Capabilities the volume vouches for
+}
+
+func (c VolumeCaps) PersistentIDs() (set, known bool)
+func (c VolumeCaps) CaseSensitive() (set, known bool)
+func (c VolumeCaps) DirHardLinks() (set, known bool)
+```
+
+macOS only: on other platforms the names do not exist, so a build that
+mentions them fails to compile.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `fd` | `uintptr` | A descriptor open on a directory or a file of the volume, the value `os.File.Fd` returns. Never closed. |
+| **returns** | `VolumeCaps` | The volume's format capabilities: the bits it reports, and the bits it vouches for. |
+| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `EBADF` for a closed descriptor, `ENOTSUP` for a volume whose answer leaves the capabilities out. |
+
+`Volume` asks the kernel with one `fgetattrlist` on every call, so a walker
+asks once per root. A file's descriptor answers for the volume it lies on, as
+a directory's does. Each method answers one bit as `(set, known)`: `known` is
+whether the volume vouches for the bit, and `set` is never true for a bit it
+does not.
+
+- `PersistentIDs`: whether the volume keeps a file's id across runs, so a
+  listed `FileID` can be trusted. APFS does; FAT and exFAT do not.
+- `CaseSensitive`: whether two names differing only in case are two files.
+- `DirHardLinks`: whether a directory can have more than one link.
+
+What an unknown bit means is the caller's choice, and so is the answer when
+the call fails: no default is folded in. The listing itself takes an unknown
+`PersistentIDs` as ids kept, `!known || set`, and a volume it cannot ask as
+not keeping them, without remembering the failure, so its next listing asks
+again. On this Mac's APFS volumes
+every bit is vouched for: ids kept, case not sensitive, directory hard links
+not allowed.
+
+```go
+// keepsIDs is whether the volume holding root keeps its files' ids, with the
+// defaults the listing takes.
+func keepsIDs(root *os.File) (bool, error) {
+	conn, err := root.SyscallConn()
+	if err != nil {
+		return false, err
+	}
+	var caps frd.VolumeCaps
+	if cerr := conn.Control(func(fd uintptr) { caps, err = frd.Volume(fd) }); cerr != nil {
+		return false, cerr
+	}
+	if err != nil {
+		return false, err // a volume that cannot be asked: ids not kept
+	}
+	set, known := caps.PersistentIDs()
+	return !known || set, nil // a bit the volume does not vouch for: ids kept
+}
+```
+
+### `DirLinks`
+
+```go
+func DirLinks(fd uintptr) (uint32, error)
+```
+
+macOS only, as `Volume` is.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `fd` | `uintptr` | A descriptor open on a directory, the value `os.File.Fd` returns. Never closed. |
+| **returns** | `uint32` | The directory's link count. |
+| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `ENOTDIR` for a descriptor that is not a directory, `ENOTSUP` for a volume that does not report the count, `EBADF` for a closed descriptor. |
+
+The count comes from one `fgetattrlist`; an answer without it costs an
+`fstat` as well, to tell `ENOTDIR` from `ENOTSUP`. What the count means is
+the caller's to decide: APFS has no directory hard links, and a directory
+there counts 1.
+
+```go
+// dirLinks is the link count of the open directory dir.
+func dirLinks(dir *os.File) (uint32, error) {
+	conn, err := dir.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	var n uint32
+	if cerr := conn.Control(func(fd uintptr) { n, err = frd.DirLinks(fd) }); cerr != nil {
+		return 0, cerr
+	}
+	return n, err
+}
+```
+
 ### `Entry`
 
 ```go
@@ -430,9 +530,11 @@ The package calls libSystem the way `golang.org/x/sys/unix` does: a
 for each libSystem function, and the runtime's `syscall.syscall6`, which Go keeps reachable by linkname
 for exactly this kind of package. If a future Go release closed that
 door, the package would stop building on macOS rather than misbehave, and
-`golang.org/x/sys` would be in the same position. One of the three libSystem
-functions, `__getdirentries64` for `Lister.Names`, is private: Apple's own
-`readdir` is built on it, but the App Store rejects a submitted binary that
+`golang.org/x/sys` would be in the same position. `Volume` and `DirLinks` add
+no import: they use `fgetattrlist`, which the listing already calls to ask
+whether a volume keeps file ids. One of the three libSystem functions,
+`__getdirentries64` for `Lister.Names`, is private: Apple's own `readdir` is
+built on it, but the App Store rejects a submitted binary that
 imports it, and the import is made by every macOS binary that uses this
 package, not only by one that sets `Names`.
 

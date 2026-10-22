@@ -10,7 +10,9 @@
 // names and types alone by getdirentries64, which reads the directory's
 // records and nothing else, unless a record carries no type, which APFS
 // never returns; it is libSystem's private __getdirentries64, linked by
-// every macOS binary that imports this package.
+// every macOS binary that imports this package. On macOS, Volume answers
+// what a volume can do and DirLinks a directory's link count, both by
+// fgetattrlist.
 //
 // On Linux the directory is read as raw getdents64 records and each regular
 // file is stat'ed with statx relative to the directory, its name passed in
