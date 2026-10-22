@@ -127,7 +127,8 @@ output and a line about the machine would be very welcome.
 ## API
 
 Twelve names. Full documentation and runnable examples, including a tree walk,
-are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples).
+are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg-examples),
+where the three macOS names show under its darwin platform selector.
 
 | Name | What it does |
 |---|---|
@@ -135,7 +136,7 @@ are on [pkg.go.dev](https://pkg.go.dev/github.com/pbednarcik/flexreaddir/frd#pkg
 | [`AppendDir`](#appenddir) | Lists an open directory, appending to a slice you reuse. |
 | [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles, and names and types only with `Names` set. |
 | [`Volume`](#volume) | Asks what the volume holding a descriptor can do: persistent file ids, case sensitivity, directory hard links. macOS only. |
-| [`VolumeCaps`](#volume) | The volume's format capabilities, each bit as (set, known). |
+| [`VolumeCaps`](#volume) | The volume's format capabilities, each bit as (set, known). macOS only. |
 | [`DirLinks`](#dirlinks) | A directory's link count. macOS only. |
 | [`Entry`](#entry) | One entry: name, type, size, times and file id. |
 | [`Entry.ModTime`](#entrymodtime) | The modification time as a `time.Time`. |
@@ -339,7 +340,7 @@ mentions them fails to compile.
 |---|---|---|
 | `fd` | `uintptr` | A descriptor open on a directory or a file of the volume, the value `os.File.Fd` returns. Never closed. |
 | **returns** | `VolumeCaps` | The volume's format capabilities: the bits it reports, and the bits it vouches for. |
-| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `EBADF` for a closed descriptor, `ENOTSUP` for a volume whose answer leaves the capabilities out. |
+| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `EBADF` for a closed descriptor, `EINVAL` for one that is not a file or directory (a pipe, a socket, a kqueue), `ENOTSUP` for a volume whose answer leaves the capabilities out. |
 
 `Volume` asks the kernel with one `fgetattrlist` on every call, so a walker
 asks once per root. A file's descriptor answers for the volume it lies on, as
@@ -392,12 +393,13 @@ macOS only, as `Volume` is.
 |---|---|---|
 | `fd` | `uintptr` | A descriptor open on a directory, the value `os.File.Fd` returns. Never closed. |
 | **returns** | `uint32` | The directory's link count. |
-| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `ENOTDIR` for a descriptor that is not a directory, `ENOTSUP` for a volume that does not report the count, `EBADF` for a closed descriptor. |
+| **returns** | `error` | `nil`, or an `*os.PathError` with `Op` `fgetattrlist` and no path: `ENOTDIR` for a file's or a symlink's descriptor, `EINVAL` for a pipe, a socket or a kqueue, `ENOTSUP` for a volume that does not report the count, and any other errno the call or `fstat` answers: `EBADF` for a closed descriptor, or one whose volume was force-unmounted under it. |
 
-The count comes from one `fgetattrlist`; an answer without it costs an
-`fstat` as well, to tell `ENOTDIR` from `ENOTSUP`. What the count means is
-the caller's to decide: APFS has no directory hard links, and a directory
-there counts 1.
+The count is `ATTR_DIR_LINKCOUNT`, the directory's own hard-link count, not
+`st_nlink`, which on APFS is its entry count plus two. It comes from one
+`fgetattrlist`; an answer without it costs an `fstat` as well, to tell
+`ENOTDIR` from `ENOTSUP`. What the count means is the caller's to decide:
+APFS has no directory hard links, and a directory there counts 1.
 
 ```go
 // dirLinks is the link count of the open directory dir.

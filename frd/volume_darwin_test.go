@@ -5,36 +5,40 @@ package frd
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestEachCapabilityAnswersSetAndKnown(t *testing.T) {
-	for name, c := range map[string]struct {
-		capabilities, valid uint32
-		set, known          bool
+	const all = volCapPersistentIDs | volCapCaseSensitive | volCapDirHardLinks
+	for name, m := range map[string]struct {
+		bit    uint32
+		method func(VolumeCaps) (set, known bool)
 	}{
-		"valid and set":   {volCapCaseSensitive, volCapCaseSensitive, true, true},
-		"valid and clear": {0, volCapCaseSensitive, false, true},
-		"not valid":       {volCapCaseSensitive, 0, false, false},
+		"PersistentIDs": {volCapPersistentIDs, VolumeCaps.PersistentIDs},
+		"CaseSensitive": {volCapCaseSensitive, VolumeCaps.CaseSensitive},
+		"DirHardLinks":  {volCapDirHardLinks, VolumeCaps.DirHardLinks},
 	} {
-		caps := VolumeCaps{Capabilities: c.capabilities, Valid: c.valid}
-		if set, known := caps.CaseSensitive(); set != c.set || known != c.known {
-			t.Errorf("%s: CaseSensitive = %v, %v; want %v, %v", name, set, known, c.set, c.known)
+		others := all &^ m.bit
+		for row, c := range map[string]struct {
+			capabilities, valid uint32
+			set, known          bool
+		}{
+			"set and valid":   {m.bit, m.bit, true, true},
+			"clear and valid": {0, m.bit, false, true},
+			"not valid":       {m.bit, 0, false, false},
+			"only the others": {others, others, false, false},
+		} {
+			caps := VolumeCaps{Capabilities: c.capabilities, Valid: c.valid}
+			if set, known := m.method(caps); set != c.set || known != c.known {
+				t.Errorf("%s, %s: %v, %v; want %v, %v", name, row, set, known, c.set, c.known)
+			}
 		}
-	}
-	// the other two methods read their own bit and no other
-	all := VolumeCaps{Capabilities: volCapPersistentIDs | volCapDirHardLinks, Valid: volCapPersistentIDs | volCapDirHardLinks}
-	if set, known := all.PersistentIDs(); !set || !known {
-		t.Errorf("PersistentIDs = %v, %v", set, known)
-	}
-	if set, known := all.DirHardLinks(); !set || !known {
-		t.Errorf("DirHardLinks = %v, %v", set, known)
-	}
-	if set, known := all.CaseSensitive(); set || known {
-		t.Errorf("CaseSensitive = %v, %v on a word without the bit", set, known)
 	}
 }
 
@@ -66,7 +70,7 @@ func TestTheTestsVolumeAnswersAsAPFS(t *testing.T) {
 }
 
 func TestAFATVolumeKeepsNoIDs(t *testing.T) {
-	fd := openRaw(t, fatImage(t))
+	fd := openRaw(t, mountedImage(t, "MS-DOS"))
 	defer mustCloseRaw(t, fd)
 	caps, err := Volume(fd)
 	if err != nil {
@@ -74,6 +78,71 @@ func TestAFATVolumeKeepsNoIDs(t *testing.T) {
 	}
 	if set, known := caps.PersistentIDs(); set || !known {
 		t.Errorf("PersistentIDs = %v, %v on FAT; want false, true", set, known)
+	}
+}
+
+func TestACaseSensitiveAPFSVolumeSaysSo(t *testing.T) {
+	fd := openRaw(t, mountedImage(t, "Case-sensitive APFS"))
+	defer mustCloseRaw(t, fd)
+	caps, err := Volume(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set, known := caps.CaseSensitive(); !set || !known {
+		t.Errorf("CaseSensitive = %v, %v on case-sensitive APFS; want true, true", set, known)
+	}
+}
+
+func TestAnHFSPlusVolumeAllowsDirectoryHardLinks(t *testing.T) {
+	fd := openRaw(t, mountedImage(t, "HFS+"))
+	defer mustCloseRaw(t, fd)
+	caps, err := Volume(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set, known := caps.DirHardLinks(); !set || !known {
+		t.Errorf("DirHardLinks = %v, %v on HFS+; want true, true", set, known)
+	}
+}
+
+// devfs leaves VOL_CAP_FMT_DIR_HARDLINKS out of the bits it vouches for.
+func TestDevfsDoesNotVouchForDirectoryHardLinks(t *testing.T) {
+	fd := openRaw(t, "/dev")
+	defer mustCloseRaw(t, fd)
+	caps, err := Volume(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set, known := caps.DirHardLinks(); set || known {
+		t.Errorf("DirHardLinks = %v, %v on devfs; want false, false", set, known)
+	}
+	if _, known := caps.PersistentIDs(); !known {
+		t.Errorf("PersistentIDs not known on devfs (Valid %#x)", caps.Valid)
+	}
+}
+
+func TestVolumeThroughSyscallConnMatchesTheRawDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	conn, err := f.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got VolumeCaps
+	if cerr := conn.Control(func(fd uintptr) { got, err = Volume(fd) }); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd := openRaw(t, dir)
+	defer mustCloseRaw(t, fd)
+	if want, err := Volume(fd); err != nil || got != want {
+		t.Errorf("Volume through SyscallConn = %+v; the raw descriptor's = %+v, %v", got, want, err)
 	}
 }
 
@@ -155,16 +224,59 @@ func TestDirLinksOnAClosedDescriptorIsEBADF(t *testing.T) {
 	}
 }
 
+// A pipe, a socket or a kqueue is not a vnode, and the kernel answers EINVAL.
+func TestANonVnodeDescriptorIsEINVAL(t *testing.T) {
+	var p [2]int
+	if err := unix.Pipe(p[:]); err != nil {
+		t.Fatal(err)
+	}
+	defer mustCloseRaw(t, uintptr(p[1]))
+	defer mustCloseRaw(t, uintptr(p[0]))
+	r := uintptr(p[0])
+	if _, err := Volume(r); !errors.Is(err, syscall.EINVAL) {
+		t.Errorf("Volume(pipe) = %v, want EINVAL", err)
+	}
+	if _, err := DirLinks(r); !errors.Is(err, syscall.EINVAL) {
+		t.Errorf("DirLinks(pipe) = %v, want EINVAL", err)
+	}
+}
+
+// After a forced unmount under an open directory the kernel still answers the
+// directory-set ask, short, and fstat answers EBADF: the error is that EBADF,
+// as Volume's is, and never ENOTDIR.
+func TestDirLinksAfterAForcedUnmountIsEBADF(t *testing.T) {
+	mnt := mountedImage(t, "MS-DOS")
+	sub := filepath.Join(mnt, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fd := openRaw(t, sub)
+	t.Cleanup(func() { _ = closeRaw(fd) })
+	if out, err := exec.Command("hdiutil", "detach", "-quiet", "-force", mnt).CombinedOutput(); err != nil {
+		t.Fatalf("hdiutil detach: %v: %s", err, out)
+	}
+	_, err := DirLinks(fd)
+	if pe, ok := errors.AsType[*os.PathError](err); !ok || pe.Op != volumeOp || !errors.Is(err, syscall.EBADF) {
+		t.Errorf("DirLinks after a forced unmount = %v, want a %s EBADF", err, volumeOp)
+	}
+	if _, err := Volume(fd); !errors.Is(err, syscall.EBADF) {
+		t.Errorf("Volume after a forced unmount = %v, want EBADF", err)
+	}
+}
+
 func TestAnOmittedCountIsNotSupportedOnADirectory(t *testing.T) {
 	short := dirLinkCount{length: 4}
-	if _, err := dirLinksFrom(short, true); !errors.Is(err, syscall.ENOTSUP) {
+	if _, err := dirLinksFrom(short, nil, true); !errors.Is(err, syscall.ENOTSUP) {
 		t.Errorf("dirLinksFrom(short, dir) = %v, want ENOTSUP", err)
 	}
-	if _, err := dirLinksFrom(short, false); !errors.Is(err, syscall.ENOTDIR) {
+	if _, err := dirLinksFrom(short, nil, false); !errors.Is(err, syscall.ENOTDIR) {
 		t.Errorf("dirLinksFrom(short, file) = %v, want ENOTDIR", err)
 	}
+	if _, err := dirLinksFrom(short, syscall.EBADF, false); !errors.Is(err, syscall.EBADF) {
+		t.Errorf("dirLinksFrom(short, fstat EBADF) = %v, want EBADF", err)
+	}
 	full := dirLinkCount{length: 8, count: 3}
-	if n, err := dirLinksFrom(full, true); err != nil || n != 3 {
+	if n, err := dirLinksFrom(full, nil, true); err != nil || n != 3 {
 		t.Errorf("dirLinksFrom(full) = %d, %v; want 3, nil", n, err)
 	}
 }

@@ -34,7 +34,7 @@ func TestADirectoryThatCannotBeSearchedIsAPathErrorNamingIt(t *testing.T) {
 // every listing), so it reports them as not persistent and the listing gives
 // none. The test attaches a FAT disk image with hdiutil.
 func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
-	mnt := fatImage(t)
+	mnt := mountedImage(t, "MS-DOS")
 	sub := filepath.Join(mnt, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -59,10 +59,11 @@ func TestAVolumeWhoseIDsDoNotPersistListsNoFileIDs(t *testing.T) {
 	}
 }
 
-// fatImage makes an 8 MB FAT disk image with hdiutil, attaches it for the
-// test's life and returns its mount point. It skips the test under -short,
-// and where hdiutil is missing or fails.
-func fatImage(t *testing.T) string {
+// mountedImage makes an 8 MB disk image of the file system fs (an hdiutil
+// -fs name such as "MS-DOS"), attaches it for the test's life and returns its
+// mount point. It skips the test under -short, and where hdiutil is missing or
+// fails. A test may detach the image itself.
+func mountedImage(t *testing.T, fs string) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("attaches a disk image")
@@ -72,19 +73,32 @@ func fatImage(t *testing.T) string {
 		t.Skip(err)
 	}
 	dir := t.TempDir()
-	img, mnt := filepath.Join(dir, "fat.dmg"), filepath.Join(dir, "mnt")
-	if out, err := exec.Command(hdiutil, "create", "-quiet", "-size", "8m", "-fs", "MS-DOS", "-volname", "FRD", img).CombinedOutput(); err != nil {
-		t.Skipf("hdiutil create: %v: %s", err, out)
+	img, mnt := filepath.Join(dir, "image.dmg"), filepath.Join(dir, "mnt")
+	if out, err := exec.Command(hdiutil, "create", "-quiet", "-size", "8m", "-fs", fs, "-volname", "FRD", img).CombinedOutput(); err != nil {
+		t.Skipf("hdiutil create -fs %s: %v: %s", fs, err, out)
 	}
 	if out, err := exec.Command(hdiutil, "attach", "-quiet", "-nobrowse", "-mountpoint", mnt, img).CombinedOutput(); err != nil {
 		t.Skipf("hdiutil attach: %v: %s", err, out)
 	}
 	t.Cleanup(func() {
+		if !mounted(mnt) {
+			return
+		}
 		if out, err := exec.Command(hdiutil, "detach", "-quiet", "-force", mnt).CombinedOutput(); err != nil {
 			t.Errorf("hdiutil detach: %v: %s", err, out)
 		}
 	})
 	return mnt
+}
+
+// mounted is whether a volume is mounted at mnt: its file system is not that
+// of the directory holding it.
+func mounted(mnt string) bool {
+	var at, above unix.Statfs_t
+	if unix.Statfs(mnt, &at) != nil || unix.Statfs(filepath.Dir(mnt), &above) != nil {
+		return false
+	}
+	return at.Fsid != above.Fsid
 }
 
 func TestTheVolumeCapabilitiesSayWhetherIDsPersist(t *testing.T) {

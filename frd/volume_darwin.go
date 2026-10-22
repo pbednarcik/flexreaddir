@@ -14,8 +14,10 @@ import (
 
 // Volume answers what the volume holding fd can do, from one fgetattrlist on
 // fd. It is macOS only. fd may be open on a directory or a file; the error is
-// an *os.PathError from the call, and a failure is never turned into a
-// default: the caller chooses its own.
+// an *os.PathError from the call: EBADF for a closed descriptor, EINVAL for
+// one that is not a file or directory (a pipe, a socket, a kqueue), ENOTSUP
+// for a volume whose answer leaves the capabilities out. A failure is never
+// turned into a default: the caller chooses its own.
 func Volume(fd uintptr) (VolumeCaps, error) {
 	caps, err := volume(int(fd))
 	if err != nil {
@@ -34,21 +36,17 @@ type VolumeCaps struct {
 
 // PersistentIDs is whether the volume keeps a file's id across runs, so a
 // listed FileID can be trusted. APFS does; FAT and exFAT do not.
-func (c VolumeCaps) PersistentIDs() (set, known bool) {
-	const bit = volCapPersistentIDs
-	return c.Capabilities&bit != 0 && c.Valid&bit != 0, c.Valid&bit != 0
-}
+func (c VolumeCaps) PersistentIDs() (set, known bool) { return c.bit(volCapPersistentIDs) }
 
 // CaseSensitive is whether two names differing only in case are two files.
-func (c VolumeCaps) CaseSensitive() (set, known bool) {
-	const bit = volCapCaseSensitive
-	return c.Capabilities&bit != 0 && c.Valid&bit != 0, c.Valid&bit != 0
-}
+func (c VolumeCaps) CaseSensitive() (set, known bool) { return c.bit(volCapCaseSensitive) }
 
 // DirHardLinks is whether a directory can have more than one link.
-func (c VolumeCaps) DirHardLinks() (set, known bool) {
-	const bit = volCapDirHardLinks
-	return c.Capabilities&bit != 0 && c.Valid&bit != 0, c.Valid&bit != 0
+func (c VolumeCaps) DirHardLinks() (set, known bool) { return c.bit(volCapDirHardLinks) }
+
+func (c VolumeCaps) bit(mask uint32) (set, known bool) {
+	known = c.Valid&mask != 0
+	return known && c.Capabilities&mask != 0, known
 }
 
 const volumeOp = "fgetattrlist"
@@ -92,9 +90,11 @@ type volCapabilities struct {
 }
 
 // DirLinks is the link count of the directory fd, from one fgetattrlist on
-// fd. It is macOS only. The error is an *os.PathError from the call, ENOTDIR
-// for a descriptor that is not a directory, ENOTSUP for a volume that does
-// not report the count.
+// fd: ATTR_DIR_LINKCOUNT, the directory's own hard-link count, not st_nlink,
+// which on APFS is its entry count plus two. It is macOS only. The error is an
+// *os.PathError: ENOTDIR for a file's or a symlink's descriptor, EINVAL for a
+// pipe, a socket or a kqueue, ENOTSUP for a volume that does not report the
+// count, and any other errno the call or fstat answers.
 func DirLinks(fd uintptr) (uint32, error) {
 	var got dirLinkCount
 	for {
@@ -107,12 +107,14 @@ func DirLinks(fd uintptr) (uint32, error) {
 		}
 		break
 	}
+	var statErr error
 	var isDir bool
 	if got.length < uint32(unsafe.Sizeof(got)) {
 		var st unix.Stat_t
-		isDir = unix.Fstat(int(fd), &st) == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR
+		statErr = unix.Fstat(int(fd), &st)
+		isDir = st.Mode&unix.S_IFMT == unix.S_IFDIR
 	}
-	n, err := dirLinksFrom(got, isDir)
+	n, err := dirLinksFrom(got, statErr, isDir)
 	if err != nil {
 		return 0, &os.PathError{Op: volumeOp, Err: err}
 	}
@@ -120,12 +122,16 @@ func DirLinks(fd uintptr) (uint32, error) {
 }
 
 // dirLinksFrom reads the count from an answer of the full length. A shorter
-// one omits the attribute: for a directory the volume does not report it,
-// and anything else is not a directory.
-func dirLinksFrom(got dirLinkCount, isDir bool) (uint32, error) {
+// one omits the attribute, and fstat's answer for fd says why: its own error
+// (a volume force-unmounted under fd answers short, then EBADF), a directory
+// on a volume that does not report the count, or anything else, which is not
+// a directory.
+func dirLinksFrom(got dirLinkCount, statErr error, isDir bool) (uint32, error) {
 	switch {
 	case got.length >= uint32(unsafe.Sizeof(got)):
 		return got.count, nil
+	case statErr != nil:
+		return 0, statErr
 	case isDir:
 		return 0, syscall.ENOTSUP
 	default:
