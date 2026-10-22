@@ -119,3 +119,52 @@ func TestAShortAnswerIsNotSupported(t *testing.T) {
 		t.Errorf("volumeFrom(full) = %+v, %v", got, err)
 	}
 }
+
+func TestADirectoryOnAPFSHasOneLink(t *testing.T) {
+	fd := openRaw(t, t.TempDir())
+	defer mustCloseRaw(t, fd)
+	if n, err := DirLinks(fd); err != nil || n != 1 {
+		t.Fatalf("DirLinks = %d, %v; want 1, nil", n, err)
+	}
+}
+
+func TestDirLinksOnAFileIsENOTDIR(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mustClose(t, f)
+	_, err = DirLinks(f.Fd())
+	pe, ok := errors.AsType[*os.PathError](err)
+	if !ok || pe.Op != volumeOp || pe.Path != "" || !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatalf("DirLinks(file) = %v, want a %s ENOTDIR with no path", err, volumeOp)
+	}
+}
+
+func TestDirLinksOnAClosedDescriptorIsEBADF(t *testing.T) {
+	for _, fd := range []uintptr{^uintptr(0), 999} {
+		_, err := DirLinks(fd)
+		pe, ok := errors.AsType[*os.PathError](err)
+		if !ok || pe.Op != volumeOp || pe.Path != "" || !errors.Is(err, syscall.EBADF) {
+			t.Errorf("DirLinks(%d) = %v, want a %s EBADF with no path", fd, err, volumeOp)
+		}
+	}
+}
+
+func TestAnOmittedCountIsNotSupportedOnADirectory(t *testing.T) {
+	short := dirLinkCount{length: 4}
+	if _, err := dirLinksFrom(short, true); !errors.Is(err, syscall.ENOTSUP) {
+		t.Errorf("dirLinksFrom(short, dir) = %v, want ENOTSUP", err)
+	}
+	if _, err := dirLinksFrom(short, false); !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("dirLinksFrom(short, file) = %v, want ENOTDIR", err)
+	}
+	full := dirLinkCount{length: 8, count: 3}
+	if n, err := dirLinksFrom(full, true); err != nil || n != 3 {
+		t.Errorf("dirLinksFrom(full) = %d, %v; want 3, nil", n, err)
+	}
+}

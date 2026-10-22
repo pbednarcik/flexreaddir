@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // Volume answers what the volume holding fd can do, from one fgetattrlist on
@@ -89,6 +91,56 @@ type volCapabilities struct {
 	valid        [4]uint32
 }
 
+// DirLinks is the link count of the directory fd, from one fgetattrlist on
+// fd. It is macOS only. The error is an *os.PathError from the call, ENOTDIR
+// for a descriptor that is not a directory, ENOTSUP for a volume that does
+// not report the count.
+func DirLinks(fd uintptr) (uint32, error) {
+	var got dirLinkCount
+	for {
+		err := fgetattrlist(int(fd), &dirLinkCountAttrs, unsafe.Pointer(&got), unsafe.Sizeof(got))
+		if errors.Is(err, syscall.EINTR) {
+			continue
+		}
+		if err != nil {
+			return 0, &os.PathError{Op: volumeOp, Err: err}
+		}
+		break
+	}
+	var isDir bool
+	if got.length < uint32(unsafe.Sizeof(got)) {
+		var st unix.Stat_t
+		isDir = unix.Fstat(int(fd), &st) == nil && st.Mode&unix.S_IFMT == unix.S_IFDIR
+	}
+	n, err := dirLinksFrom(got, isDir)
+	if err != nil {
+		return 0, &os.PathError{Op: volumeOp, Err: err}
+	}
+	return n, nil
+}
+
+// dirLinksFrom reads the count from an answer of the full length. A shorter
+// one omits the attribute: for a directory the volume does not report it,
+// and anything else is not a directory.
+func dirLinksFrom(got dirLinkCount, isDir bool) (uint32, error) {
+	switch {
+	case got.length >= uint32(unsafe.Sizeof(got)):
+		return got.count, nil
+	case isDir:
+		return 0, syscall.ENOTSUP
+	default:
+		return 0, syscall.ENOTDIR
+	}
+}
+
+var dirLinkCountAttrs = attrlist{bitmapCount: 5, directory: attrDirLinkCount}
+
+// dirLinkCount is the length getattrlist returns followed by the
+// ATTR_DIR_LINKCOUNT u_int32_t.
+type dirLinkCount struct {
+	length, count uint32
+}
+
 const (
 	attrVolInfo           = 0x80000000 // ATTR_VOL_INFO
 	attrVolCapabilities   = 0x00020000 // ATTR_VOL_CAPABILITIES
@@ -96,6 +148,7 @@ const (
 	volCapPersistentIDs   = 0x00000001 // VOL_CAP_FMT_PERSISTENTOBJECTIDS
 	volCapCaseSensitive   = 0x00000100 // VOL_CAP_FMT_CASE_SENSITIVE
 	volCapDirHardLinks    = 0x00040000 // VOL_CAP_FMT_DIR_HARDLINKS
+	attrDirLinkCount      = 0x00000001 // ATTR_DIR_LINKCOUNT
 )
 
 func fgetattrlist(fd int, al *attrlist, buf unsafe.Pointer, size uintptr) error {
