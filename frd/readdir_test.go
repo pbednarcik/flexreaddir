@@ -39,10 +39,14 @@ func TestReadDirAgreesWithOSReadDir(t *testing.T) {
 }
 
 func TestReadDirOfAMissingDirectoryIsTheOpensPathError(t *testing.T) {
-	_, err := ReadDir(filepath.Join(t.TempDir(), "missing"))
+	name := filepath.Join(t.TempDir(), "missing")
+	_, err := ReadDir(name)
 	var pe *os.PathError
 	if !errors.As(err, &pe) || !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("err = %v, want an *os.PathError wrapping fs.ErrNotExist", err)
+	}
+	if pe.Op != "open" || pe.Path != name {
+		t.Fatalf("err = %v, want op open on %s", err, name)
 	}
 }
 

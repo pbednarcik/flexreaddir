@@ -92,6 +92,30 @@ func BenchmarkAppendDir(b *testing.B) {
 	}
 }
 
+// BenchmarkReadDir is the sorted listing from a name: the open, the listing,
+// the close and the sort.
+func BenchmarkReadDir(b *testing.B) {
+	for _, files := range []int{10, 1000} {
+		dir := b.TempDir()
+		for i := range files {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("file%04d.go", i)), []byte("package p\n"), 0o644); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.Run(fmt.Sprintf("files=%d", files), func(b *testing.B) {
+			if entries, err := ReadDir(dir); err != nil || len(entries) != files {
+				b.Fatalf("%d entries, %v; want %d", len(entries), err, files)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := ReadDir(dir); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // benchListing opens dir, lists it with list and closes it, once per
 // iteration, and fails unless list saw all the files.
 func benchListing(b *testing.B, dir string, files int, list func(*os.File) (int, error)) {

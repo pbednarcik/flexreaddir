@@ -7,6 +7,9 @@ package frd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -177,5 +180,27 @@ func TestParseFullInfoOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("parsing an empty directory allocated %v times, want 0", allocs)
+	}
+}
+
+// ReadDir on macOS and Linux lists through a bare descriptor: the open's
+// path, the entries and their names, and nothing for an os.File.
+func TestReadDirAllocatesAtMost(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("ReadDir opens an os.File here")
+	}
+	dir := t.TempDir()
+	for _, name := range hundredFiles()[:10] {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		if entries, err := ReadDir(dir); err != nil || len(entries) != 10 {
+			t.Fatalf("%d entries, %v; want 10", len(entries), err)
+		}
+	})
+	if allocs > 3 {
+		t.Fatalf("ReadDir of 10 files allocated %v times, want 3", allocs)
 	}
 }
