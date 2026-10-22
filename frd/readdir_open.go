@@ -22,6 +22,10 @@ func listDir(name string) ([]Entry, error) {
 	return entries, err
 }
 
+// sortListing sorts a listing for ReadDir with SortByName, whose stable sort
+// beats pdqsort on the nearly sorted order NTFS returns.
+func sortListing(entries []Entry) { SortByName(entries) }
+
 // notADirectory is the error for a failed listing of a name the open let
 // through that is not a directory.
 func notADirectory(name string) error {

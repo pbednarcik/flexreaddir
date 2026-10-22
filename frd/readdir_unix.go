@@ -4,6 +4,7 @@ package frd
 
 import (
 	"os"
+	"slices"
 
 	"golang.org/x/sys/unix"
 )
@@ -23,6 +24,12 @@ func listDir(name string) ([]Entry, error) {
 	listers.Put(l)
 	return entries, err
 }
+
+// sortListing sorts a listing for ReadDir with pdqsort, which beat the
+// stable sort on APFS's hash order and on the Linux listings measured, on
+// btrfs and overlayfs (docs/notes/evidence/2026-10-22-readdir-sort.md). The
+// names in one listing are unique, so the order is SortByName's.
+func sortListing(entries []Entry) { slices.SortFunc(entries, CompareName) }
 
 func openDir(name string) (int, error) {
 	for {

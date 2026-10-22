@@ -10,6 +10,6 @@ package frd
 // unsorted, reusable form.
 func ReadDir(name string) ([]Entry, error) {
 	entries, err := listDir(name)
-	SortByName(entries)
+	sortListing(entries)
 	return entries, err
 }
