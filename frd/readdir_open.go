@@ -7,7 +7,8 @@ import (
 	"syscall"
 )
 
-func listDir(name string) ([]Entry, error) {
+// listDirFile lists name through an os.File.
+func listDirFile(name string) ([]Entry, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err

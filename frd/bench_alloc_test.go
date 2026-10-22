@@ -183,10 +183,10 @@ func TestParseFullInfoOfAnEmptyDirectoryAllocatesNothing(t *testing.T) {
 	}
 }
 
-// ReadDir on macOS and Linux lists through a bare descriptor: the open's
+// ReadDir on macOS, Linux and Windows lists through a bare handle: the open's
 // path, the entries and their names, and nothing for an os.File.
 func TestReadDirAllocatesAtMost(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
 		t.Skip("ReadDir opens an os.File here")
 	}
 	dir := t.TempDir()

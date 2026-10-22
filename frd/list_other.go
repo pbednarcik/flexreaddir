@@ -8,6 +8,8 @@ import (
 	"os"
 )
 
+func listDir(name string) ([]Entry, error) { return listDirFile(name) }
+
 func appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 	return appendDirNames(dst, dir, false)
 }
