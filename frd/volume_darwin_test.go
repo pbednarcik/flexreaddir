@@ -168,3 +168,23 @@ func TestAnOmittedCountIsNotSupportedOnADirectory(t *testing.T) {
 		t.Errorf("dirLinksFrom(full) = %d, %v; want 3, nil", n, err)
 	}
 }
+
+func BenchmarkVolume(b *testing.B) {
+	fd := openRaw(b, b.TempDir())
+	defer mustCloseRaw(b, fd)
+	for b.Loop() {
+		if _, err := Volume(fd); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkDirLinks(b *testing.B) {
+	fd := openRaw(b, b.TempDir())
+	defer mustCloseRaw(b, fd)
+	for b.Loop() {
+		if _, err := DirLinks(fd); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
