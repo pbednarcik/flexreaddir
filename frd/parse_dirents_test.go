@@ -107,6 +107,39 @@ func TestAVisitorErrorStopsTheWalk(t *testing.T) {
 	}
 }
 
+func TestDirentSizesCountWhatTheWalkVisits(t *testing.T) {
+	good := dirent("a.go", dtRegular)
+	deleted := dirent("gone", dtRegular)
+	binary.NativeEndian.PutUint64(deleted, 0)
+	withLength := func(n uint16) []byte {
+		b := dirent("b.go", dtRegular)
+		binary.NativeEndian.PutUint16(b[16:], n)
+		return b
+	}
+	noNUL := dirent("b.go", dtRegular)
+	for i := direntHeader; i < len(noNUL); i++ {
+		noNUL[i] = 'x'
+	}
+	for name, c := range map[string]struct {
+		buf                []byte
+		entries, nameBytes int
+	}{
+		"the dots skipped, the names exact":   {slices.Concat(dirent(".", dtDir), dirent("..", dtDir), good, dirent("longer-name.go", dtRegular), dirent(".git", dtDir)), 3, 4 + 14 + 4},
+		"a d_ino of 0, which the walk visits": {deleted, 1, 4},
+		"no records":                          {nil, 0, 0},
+		"a header cut short":                  {slices.Concat(good, good[:10]), 1, 4},
+		"a reclen shorter than the header":    {slices.Concat(good, withLength(8)), 1, 4},
+		"a reclen of the header alone":        {slices.Concat(good, withLength(direntHeader)), 1, 4},
+		"a reclen past the buffer":            {slices.Concat(good, withLength(4096)), 1, 4},
+		"a name with no NUL":                  {slices.Concat(good, noNUL), 1, 4},
+		"an empty name":                       {slices.Concat(good, dirent("", dtRegular)), 1, 4},
+	} {
+		if entries, nameBytes := direntSizes(c.buf); entries != c.entries || nameBytes != c.nameBytes {
+			t.Errorf("%s: direntSizes = %d, %d; want %d, %d", name, entries, nameBytes, c.entries, c.nameBytes)
+		}
+	}
+}
+
 type typed struct {
 	mode  fs.FileMode
 	known bool

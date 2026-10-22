@@ -49,12 +49,7 @@ const windowsEpoch = 116444736000000000
 // only past the block's length, and a block that must grow is copied,
 // leaving earlier names on the old array.
 func parseFullInfo(dst []Entry, buf []byte, l layout, names bool) ([]Entry, error) {
-	units, entries := 0, 0
-	_ = eachFullInfo(buf, l, func(r fullInfo) error {
-		units += len(r.name) / 2
-		entries++
-		return nil
-	})
+	entries, units := fullInfoSizes(buf, l)
 	dst = slices.Grow(dst, entries)
 	// Exact for ASCII names, plus the 32 bytes asciiRun may write past the
 	// last one; names that need more UTF-8 grow the block as append does.
@@ -92,6 +87,30 @@ type fullInfo struct {
 	writeTime  int64  // FILETIME
 	changeTime int64  // FILETIME
 	fileID     uint64 // the FileId's low half when its high half is 0, else 0
+}
+
+// fullInfoSizes counts the records chained in buf that eachFullInfo visits
+// and the UTF-16 units of their names, from the record headers alone and
+// stopping at the first it cannot follow: a wrong count costs an allocation,
+// never a wrong name.
+func fullInfoSizes(buf []byte, l layout) (entries, units int) {
+	le := binary.LittleEndian
+	for len(buf) >= l.header {
+		next := int(le.Uint32(buf))
+		nameLen := int(le.Uint32(buf[60:]))
+		if nameLen < 2 || nameLen%2 != 0 || nameLen > len(buf)-l.header {
+			break
+		}
+		if !dotOrDotDot(buf[l.header : l.header+nameLen]) {
+			entries++
+			units += nameLen / 2
+		}
+		if next < l.header+nameLen || next > len(buf) {
+			break
+		}
+		buf = buf[next:]
+	}
+	return entries, units
 }
 
 // eachFullInfo calls visit for every record chained in buf except "." and
@@ -177,13 +196,16 @@ func attrMode(attrs, tag uint32) fs.FileMode {
 // at a NUL unit, which no Windows name holds. A leading run of units 1 to
 // 0x7F is packed by asciiRun with the widest tier the CPU has; asciiRun may
 // read to cap(u) and write 32 bytes past the last unit it packs, which the
-// Grow below makes room for. The rest goes through appendUTF16Scalar.
+// Grow below makes room for. Any rest goes through appendUTF16Scalar.
 func appendUTF16(b, u []byte) ([]byte, bool) {
 	if units := len(u) / 2; units >= 4 {
 		b = slices.Grow(b, units+32)
 		n := asciiRun(unsafe.SliceData(b[len(b):cap(b)]), unsafe.SliceData(u), units, cap(u))
 		b = b[:len(b)+n]
 		u = u[2*n:]
+		if len(u) == 0 {
+			return b, true
+		}
 	}
 	return appendUTF16Scalar(b, u)
 }

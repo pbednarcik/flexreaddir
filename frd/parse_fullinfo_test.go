@@ -191,6 +191,45 @@ func TestAMalformedFullInfoBufferIsErrMalformedWithTheEntriesBeforeIt(t *testing
 	}
 }
 
+func TestFullInfoSizesCountWhatTheWalkVisits(t *testing.T) {
+	for _, lc := range layouts {
+		two := finfosIn(lc.l, finfo{name: "first"}, finfo{name: "ab"})
+		second := (lc.l.header + 10 + 7) &^ 7 // "first" is 10 name bytes, padded to 8
+		set := func(at, field int, v uint32) []byte {
+			b := slices.Clone(two)
+			binary.LittleEndian.PutUint32(b[at+field:], v)
+			return b
+		}
+		// A next of 8 lands inside the first record, on bytes that read as a
+		// record with a name of one unit.
+		inside := set(0, 0, 8)
+		binary.LittleEndian.PutUint32(inside[8+60:], 2)
+		cases := []struct {
+			name           string
+			buf            []byte
+			entries, units int
+		}{
+			{"the dots skipped, the units exact", finfosIn(lc.l, finfo{name: "."}, finfo{name: ".."}, finfo{name: "a.go"}, finfo{name: "straße.go"}, finfo{name: "🙂"}), 3, 15},
+			{"no records", nil, 0, 0},
+			{"a header cut short", two[:second+lc.l.header-1], 1, 5},
+			{"a header cut to its first bytes", two[:second+10], 1, 5},
+			{"a name past the record", set(second, 60, 1000), 1, 5},
+			{"a name just past the buffer", set(second, 60, uint32(lc.l.header)), 1, 5},
+			{"an odd name length", set(second, 60, 3), 1, 5},
+			{"a zero-length name", set(second, 60, 0), 1, 5},
+			{"a NUL unit, which only the decode refuses", set(second, lc.l.header, 0), 2, 7},
+			{"a next past the buffer", set(0, 0, 4096), 1, 5},
+			{"a next inside its own record", set(0, 0, 8), 1, 5},
+			{"a next inside its own record, onto a record", inside, 1, 5},
+		}
+		for _, c := range cases {
+			if entries, units := fullInfoSizes(c.buf, lc.l); entries != c.entries || units != c.units {
+				t.Errorf("%s, %s: fullInfoSizes = %d, %d; want %d, %d", lc.name, c.name, entries, units, c.entries, c.units)
+			}
+		}
+	}
+}
+
 func TestFullInfoNamesAreDecodedFromUTF16(t *testing.T) {
 	cases := []struct {
 		units []uint16

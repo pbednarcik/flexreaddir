@@ -31,12 +31,7 @@ const direntHeader = 8 + 8 + 2 + 1
 // dst, so no Entry is copied on the way. Under namesOnly a regular file is
 // not stat'ed and stat fills Type only.
 func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (bool, error), namesOnly bool) ([]Entry, error) {
-	nameBytes, entries := 0, 0
-	_ = eachDirent(buf, func(name []byte, _ byte) error {
-		nameBytes += len(name)
-		entries++
-		return nil
-	})
+	entries, nameBytes := direntSizes(buf)
 	dst = slices.Grow(dst, entries)
 	var names nameBlock
 	names.grow(nameBytes)
@@ -54,6 +49,33 @@ func parseDirents(dst []Entry, buf []byte, stat func(name []byte, e *Entry) (boo
 		return nil
 	})
 	return dst, err
+}
+
+// direntSizes counts the records in buf that eachDirent visits and the bytes
+// of their names, stopping at the first record it cannot size: a wrong count
+// costs an allocation, never a wrong name, and a name counts at most its
+// record. The header holds no name length, so each name is measured to its
+// NUL; the record length would bound it for less work, but would leave the
+// kernel's padding, up to 7 bytes a name, spare in the block the names keep.
+func direntSizes(buf []byte) (entries, nameBytes int) {
+	for len(buf) >= direntHeader {
+		length := int(binary.NativeEndian.Uint16(buf[16:]))
+		if length <= direntHeader || length > len(buf) {
+			break
+		}
+		name := buf[direntHeader:length]
+		buf = buf[length:]
+		end := bytes.IndexByte(name, 0)
+		if end < 1 {
+			break
+		}
+		if name[0] == '.' && (end == 1 || end == 2 && name[1] == '.') {
+			continue
+		}
+		entries++
+		nameBytes += end
+	}
+	return entries, nameBytes
 }
 
 // eachDirent calls visit for every linux_dirent64 record in buf except "."
