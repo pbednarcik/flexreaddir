@@ -19,6 +19,9 @@ func SortByName(entries []Entry) {
 	for lo := 0; lo < n; lo += sortBlock {
 		insertionSort(entries[lo:min(lo+sortBlock, n)])
 	}
+	if n <= sortBlock {
+		return // no merge: the buffer below need not be zeroed
+	}
 	var buf [mergeBuf]Entry
 	for width := sortBlock; width < n; width *= 2 {
 		for lo := 0; lo+width < n; lo += 2 * width {
@@ -60,6 +63,12 @@ func mergeRuns(s []Entry, mid int, buf []Entry) {
 		lo := upperBound(s[:mid], s[mid].Name)
 		hi := mid + lowerBound(s[mid:], s[mid-1].Name)
 		s, mid = s[lo:hi], mid-lo
+		if s[0].Name > s[len(s)-1].Name {
+			// Every name of the second run sorts before every name of the
+			// first, as in a reversed listing: one rotation.
+			rotate(s, mid, buf)
+			return
+		}
 		if mid <= len(buf) {
 			mergeFromFront(s, mid, buf)
 			return
