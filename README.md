@@ -80,8 +80,8 @@ file, from one directory; lower is better.
 | | 10 | 24.5 µs | 20.0 µs | **12.7 µs** | **1.9×** |
 | Linux (VM) | 1,000 | 603 µs | 465 µs | **376 µs** | **1.6×** |
 | | 10 | 7.8 µs | 6.7 µs | **5.8 µs** | **1.3×** |
-| Windows | 1,000 | 164.3 µs | 161.3 µs | **131.1 µs** | **1.3×** |
-| | 10 | 15.7 µs | 15.8 µs | **14.1 µs** | **1.1×** |
+| Windows | 1,000 | 163.4 µs | 161.5 µs | **123.7 µs** | **1.3×** |
+| | 10 | 15.7 µs | 15.6 µs | **13.8 µs** | **1.1×** |
 
 "Faster" is against `os.File.ReadDir` with `Info` for each entry, the usual
 way; `os.File.Readdir` is the older API that returns a `FileInfo` per entry.
