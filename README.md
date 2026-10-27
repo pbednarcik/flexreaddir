@@ -134,7 +134,7 @@ where the three macOS names show under its darwin platform selector.
 |---|---|
 | [`ReadDir`](#readdir) | Lists a directory by name, sorted as `os.ReadDir` sorts. |
 | [`AppendDir`](#appenddir) | Lists an open directory, appending to a slice you reuse. |
-| [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles, and names and types only with `Names` set. |
+| [`Lister`](#lister) | Owns the listing buffer, for walkers; also lists raw handles, names and types only with `Names` set, and from a handle's first entry with `Rewind` set. |
 | [`Volume`](#volume) | Asks what the volume holding a descriptor can do: persistent file ids, case sensitivity, directory hard links. macOS only. |
 | [`VolumeCaps`](#volume) | The volume's format capabilities, each bit as (set, known). macOS only. |
 | [`DirLinks`](#dirlinks) | A directory's link count. macOS only. |
@@ -250,8 +250,8 @@ func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error)
 func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, error)
 ```
 
-`Lister.AppendDir` takes and returns what the function [`AppendDir`](#appenddir) does.
-`AppendHandle`:
+`Lister.AppendDir` takes and returns what the function [`AppendDir`](#appenddir) does,
+and under `Rewind` reads `dir` from its first entry. `AppendHandle`:
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -304,9 +304,17 @@ Set `Rewind` to list every directory from its first entry rather than from
 the handle's position, so a handle listed before lists again in full. A walker
 that holds each directory's handle open can then list on that handle instead
 of opening the directory a second time. On Windows the first call asks the
-restart form of its class (`FileIdExtdDirectoryRestartInfo`), so it costs
-nothing; on Linux and macOS the descriptor is moved to its start with `lseek`
-first. Two listings of one handle at once still split its entries.
+restart form of its class (`FileIdExtdDirectoryRestartInfo`, or
+`FileFullDirectoryRestartInfo` under `Names` and on a volume that refuses the
+file id), so it takes no extra call; on Linux and macOS the descriptor is
+moved to its start with `lseek` first. Two listings of one handle at once
+still split its entries.
+
+```go
+var l frd.Lister
+l.Rewind = true
+entries, err := l.AppendHandle(nil, fd, dir) // all of dir, wherever fd stood
+```
 
 `AppendHandle` is for a walker that opens directories itself. It lists a raw
 Windows handle or Unix descriptor, the value `os.File.Fd` returns, without

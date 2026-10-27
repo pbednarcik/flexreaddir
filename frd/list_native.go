@@ -38,7 +38,7 @@ type Lister struct {
 	// Rewind, when set, lists every directory from its first entry rather
 	// than from the handle's position, so a handle listed before lists again
 	// in full. On Windows the first call asks the restart form of its class,
-	// at no cost; on Linux and macOS the descriptor is first moved to its
+	// with no extra call; on Linux and macOS the descriptor is first moved to its
 	// start with lseek. Two listings of one handle at once still split its
 	// entries between them.
 	Rewind bool
