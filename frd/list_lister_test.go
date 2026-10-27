@@ -27,6 +27,40 @@ func listerTree(t *testing.T) string {
 	return dir
 }
 
+// typesOf is the set of entries' names and types.
+func typesOf(entries []Entry) map[string]os.FileMode {
+	m := make(map[string]os.FileMode, len(entries))
+	for _, e := range entries {
+		m[e.Name] = e.Type
+	}
+	return m
+}
+
+// Rewind lists an os.File listed before in full, by either listing.
+func TestRewindListsAFileListedBeforeInFull(t *testing.T) {
+	for _, names := range []bool{false, true} {
+		dir := listerTree(t)
+		f, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := Lister{Names: names}
+		first, err := l.AppendDir(nil, f)
+		if err != nil {
+			_ = f.Close() // only read: a failed close loses nothing
+			t.Fatal(err)
+		}
+		l.Rewind = true
+		again, err := l.AppendDir(nil, f)
+		if cerr := f.Close(); cerr != nil {
+			t.Fatal(cerr)
+		}
+		if err != nil || len(first) == 0 || !maps.Equal(typesOf(again), typesOf(first)) {
+			t.Errorf("names %v: AppendDir again with Rewind = %v, %v; want the first listing's %v", names, typesOf(again), err, typesOf(first))
+		}
+	}
+}
+
 func byName(t *testing.T, entries []Entry) map[string]Entry {
 	t.Helper()
 	m := map[string]Entry{}

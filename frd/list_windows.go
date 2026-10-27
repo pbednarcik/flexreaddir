@@ -39,14 +39,14 @@ func layoutOf(class uint32) layout {
 	return fullDirInfo
 }
 
-// readAll fills buf from the handle's current position until the kernel has
-// no more, asking for classFor(names). A volume that refuses FILE_ID_EXTD_DIR_INFO
+// readAll fills buf from the handle's current position, or from its first
+// entry under rewind, until the kernel has no more, asking for classFor(names). A volume that refuses FILE_ID_EXTD_DIR_INFO
 // on the first call (FAT32, WSL's 9P and older SMB servers do) is listed with
 // FILE_FULL_DIR_INFO, and its entries carry no FileID. Only the first call
 // may switch: after it, the handle's position has moved. ERROR_FILE_NOT_FOUND
 // on the first call is an empty root directory (MS-FSA 2.1.5.6.3), not a
 // failure. buf must be 8-byte aligned.
-func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names, rewind bool) ([]Entry, error) {
 	class := classFor(names)
 	l := layoutOf(class)
 	for first := true; ; first = false {
@@ -54,11 +54,11 @@ func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 		if first && class == windows.FileIdExtdDirectoryInfo && refuseFileIDWith != 0 {
 			err = refuseFileIDWith
 		} else {
-			err = windows.GetFileInformationByHandleEx(windows.Handle(h), class, &buf[0], uint32(len(buf)))
+			err = windows.GetFileInformationByHandleEx(windows.Handle(h), asked(class, first && rewind), &buf[0], uint32(len(buf)))
 		}
 		if first && class == windows.FileIdExtdDirectoryInfo && refused(err) {
 			class, l = windows.FileFullDirectoryInfo, fullDirInfo
-			err = windows.GetFileInformationByHandleEx(windows.Handle(h), class, &buf[0], uint32(len(buf)))
+			err = windows.GetFileInformationByHandleEx(windows.Handle(h), asked(class, rewind), &buf[0], uint32(len(buf)))
 		}
 		if errors.Is(err, syscall.ERROR_NO_MORE_FILES) || first && errors.Is(err, syscall.ERROR_FILE_NOT_FOUND) {
 			return dst, nil
@@ -69,6 +69,26 @@ func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
 		if dst, err = parseFullInfo(dst, buf, l, names); err != nil {
 			return dst, err
 		}
+	}
+}
+
+// The restart forms of the two listing classes, which list from the first
+// entry whatever the handle's position; x/sys does not name them.
+const (
+	fileFullDirectoryRestartInfo   = 15
+	fileIDExtdDirectoryRestartInfo = 20
+)
+
+// asked is the class a call asks for: class, or its restart form when
+// restart is set.
+func asked(class uint32, restart bool) uint32 {
+	switch {
+	case !restart:
+		return class
+	case class == windows.FileIdExtdDirectoryInfo:
+		return fileIDExtdDirectoryRestartInfo
+	default:
+		return fileFullDirectoryRestartInfo
 	}
 }
 

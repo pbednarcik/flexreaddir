@@ -18,8 +18,11 @@ const listOp = "getdents64"
 // namesListOp is the call a Names listing's errors name: the same one.
 const namesListOp = listOp
 
-func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names, rewind bool) ([]Entry, error) {
 	fd := int(h)
+	if err := toStart(fd, rewind); err != nil {
+		return dst, err
+	}
 	var stx unix.Statx_t
 	mask := uint32(statxMask)
 	if names {

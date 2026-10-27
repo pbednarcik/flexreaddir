@@ -109,8 +109,9 @@ func (l *Lister) AppendDir(dst []Entry, dir *os.File) ([]Entry, error) {
 // AppendHandle is AppendDir for a directory the caller holds as a raw
 // handle on Windows or a file descriptor elsewhere, the value [os.File.Fd]
 // returns, so a walker that opens directories itself need not wrap each in
-// an [os.File]. The listing starts at the handle's current position, so the
-// caution under AppendDir applies to a handle taken from an os.File. name is
+// an [os.File]. The listing starts at the handle's current position, or at
+// its first entry under [Lister.Rewind], so the caution under AppendDir
+// applies to a handle taken from an os.File. name is
 // used only in errors, as [os.NewFile] uses it. It honours [Lister.Names] as
 // AppendDir does.
 //

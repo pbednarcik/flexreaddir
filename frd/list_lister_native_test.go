@@ -50,6 +50,35 @@ func TestAppendHandleLeavesTheHandleOpenAtItsEnd(t *testing.T) {
 	}
 }
 
+// Rewind lists a handle listed before in full, by either listing, and a
+// handle never listed the same as without it.
+func TestRewindListsAHandleListedBeforeInFull(t *testing.T) {
+	for _, names := range []bool{false, true} {
+		dir := listerTree(t)
+		fd := openRaw(t, dir)
+		l := Lister{Names: names}
+		first, err := l.AppendHandle(nil, fd, dir)
+		if err != nil {
+			mustCloseRaw(t, fd)
+			t.Fatal(err)
+		}
+		l.Rewind = true
+		for i := range 2 {
+			again, err := l.AppendHandle(nil, fd, dir)
+			if err != nil || !maps.Equal(typesOf(again), typesOf(first)) {
+				t.Errorf("names %v: listing %d with Rewind = %v, %v; want the first listing's %v", names, i+2, typesOf(again), err, typesOf(first))
+			}
+		}
+		mustCloseRaw(t, fd)
+		fresh := openRaw(t, dir)
+		got, err := l.AppendHandle(nil, fresh, dir)
+		mustCloseRaw(t, fresh)
+		if err != nil || !maps.Equal(typesOf(got), typesOf(first)) {
+			t.Errorf("names %v: a fresh handle with Rewind = %v, %v; want %v", names, typesOf(got), err, typesOf(first))
+		}
+	}
+}
+
 func TestAppendHandleOnAFileIsAPathErrorNamingIt(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "a.go")
 	if err := os.WriteFile(file, nil, 0o644); err != nil {

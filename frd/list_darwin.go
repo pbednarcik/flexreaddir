@@ -36,8 +36,11 @@ const listOp = bulkOp
 // namesListOp is the call a Names listing's errors name here.
 const namesListOp = namesOp
 
-func readAll(dst []Entry, h uintptr, buf []byte, names bool) ([]Entry, error) {
+func readAll(dst []Entry, h uintptr, buf []byte, names, rewind bool) ([]Entry, error) {
 	fd := int(h)
+	if err := toStart(fd, rewind); err != nil {
+		return dst, err
+	}
 	if names {
 		return readNames(dst, fd, buf)
 	}

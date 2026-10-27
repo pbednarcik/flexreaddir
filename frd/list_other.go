@@ -4,6 +4,7 @@ package frd
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 )
@@ -49,9 +50,18 @@ type Lister struct {
 	// Names, when set, lists names and types only: every Entry carries Name
 	// and Type, and Size, ModTimeNanos, ChangeTimeNanos and FileID are zero.
 	Names bool
+
+	// Rewind, when set, lists every directory from its first entry rather
+	// than from dir's position, so a dir listed before lists again in full.
+	Rewind bool
 }
 
 func (l *Lister) appendDir(dst []Entry, dir *os.File) ([]Entry, error) {
+	if l.Rewind && dir != nil {
+		if _, err := dir.Seek(0, io.SeekStart); err != nil {
+			return dst, err
+		}
+	}
 	return appendDirNames(dst, dir, l.Names)
 }
 

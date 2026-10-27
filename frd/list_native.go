@@ -35,6 +35,14 @@ type Lister struct {
 	// server is not affected.
 	Names bool
 
+	// Rewind, when set, lists every directory from its first entry rather
+	// than from the handle's position, so a handle listed before lists again
+	// in full. On Windows the first call asks the restart form of its class,
+	// at no cost; on Linux and macOS the descriptor is first moved to its
+	// start with lseek. Two listings of one handle at once still split its
+	// entries between them.
+	Rewind bool
+
 	buf []byte // what the kernel fills, allocated on first use
 }
 
@@ -85,7 +93,7 @@ func (l *Lister) read(dst []Entry, fd uintptr) ([]Entry, error) {
 		// requires it (ERROR_NOACCESS otherwise).
 		l.buf = make([]byte, bufferBytes)
 	}
-	return readAll(dst, fd, l.buf, l.Names)
+	return readAll(dst, fd, l.buf, l.Names, l.Rewind)
 }
 
 // pathError names the directory in err under op, the listing call; readAll

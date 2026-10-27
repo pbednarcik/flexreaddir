@@ -241,7 +241,8 @@ runtime's kqueue; `os.ReadDir` follows each with `lstat` instead.
 
 ```go
 type Lister struct {
-	Names bool // list names and types only
+	Names  bool // list names and types only
+	Rewind bool // list each directory from its first entry
 	/* the buffer the kernel fills */
 }
 
@@ -255,7 +256,7 @@ func (l *Lister) AppendHandle(dst []Entry, fd uintptr, name string) ([]Entry, er
 | Parameter | Type | Description |
 |---|---|---|
 | `dst` | `[]Entry` | The slice to append to, as for `AppendDir`. |
-| `fd` | `uintptr` | A raw directory handle: a Windows `HANDLE` or a Unix file descriptor, the value `os.File.Fd` returns. Read from its current position; never closed. |
+| `fd` | `uintptr` | A raw directory handle: a Windows `HANDLE` or a Unix file descriptor, the value `os.File.Fd` returns. Read from its current position, or from its first entry under `Rewind`; never closed. |
 | `name` | `string` | The directory's path, used only in error messages. |
 | **returns** | `[]Entry` | `dst` with one `Entry` per name appended. |
 | **returns** | `error` | As for `AppendDir`; on platforms other than macOS, Linux and Windows, an error wrapping `errors.ErrUnsupported`. |
@@ -299,11 +300,20 @@ l := frd.Lister{Names: true}
 entries, err := l.AppendDir(nil, dir) // names and types, no stat per file
 ```
 
+Set `Rewind` to list every directory from its first entry rather than from
+the handle's position, so a handle listed before lists again in full. A walker
+that holds each directory's handle open can then list on that handle instead
+of opening the directory a second time. On Windows the first call asks the
+restart form of its class (`FileIdExtdDirectoryRestartInfo`), so it costs
+nothing; on Linux and macOS the descriptor is moved to its start with `lseek`
+first. Two listings of one handle at once still split its entries.
+
 `AppendHandle` is for a walker that opens directories itself. It lists a raw
 Windows handle or Unix descriptor, the value `os.File.Fd` returns, without
 wrapping it in an `os.File`:
 
-- it reads from the handle's current position and never closes it;
+- it reads from the handle's current position, or from its first entry under
+  `Rewind`, and never closes it;
 - `name` is used only in errors;
 - a handle taken from `os.File.Fd` needs that `os.File` kept reachable until
   the call returns, since its finalizer closes the handle;

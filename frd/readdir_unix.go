@@ -3,6 +3,7 @@
 package frd
 
 import (
+	"io"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -22,6 +23,17 @@ func listDir(name string) ([]Entry, error) {
 	entries, err := l.appendHandle([]Entry{}, uintptr(fd), name)
 	listers.Put(l)
 	return entries, err
+}
+
+// toStart moves fd to its first entry when rewind asks it to.
+func toStart(fd int, rewind bool) error {
+	if !rewind {
+		return nil
+	}
+	if _, err := unix.Seek(fd, 0, io.SeekStart); err != nil {
+		return &os.PathError{Op: "lseek", Err: err}
+	}
+	return nil
 }
 
 func openDir(name string) (int, error) {
