@@ -2,6 +2,7 @@ package frd
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -253,5 +254,25 @@ func TestAFATVolumeListsWithoutFileIDs(t *testing.T) {
 		if e.FileID != 0 {
 			t.Errorf("%s: FileID %#x on FAT", n, e.FileID)
 		}
+	}
+}
+
+// Rewind on a volume that refuses FILE_ID_EXTD_DIR_INFO: the fallback's own
+// first call restarts too, so a handle listed before lists again in full.
+func TestRewindListsAgainWhenTheVolumeRefusesTheIDClass(t *testing.T) {
+	dir := listerTree(t)
+	fd := openRaw(t, dir)
+	defer mustCloseRaw(t, fd)
+	var l Lister
+	first, err := l.AppendHandle(nil, fd, dir)
+	if err != nil || len(first) == 0 {
+		t.Fatalf("%d entries, %v", len(first), err)
+	}
+	refuseFileIDWith = windows.ERROR_INVALID_PARAMETER
+	t.Cleanup(func() { refuseFileIDWith = 0 })
+	l.Rewind = true
+	again, err := l.AppendHandle(nil, fd, dir)
+	if err != nil || !maps.Equal(typesOf(again), typesOf(first)) {
+		t.Fatalf("refused, Rewind: %v, %v; want %v", typesOf(again), err, typesOf(first))
 	}
 }

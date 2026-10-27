@@ -72,23 +72,17 @@ func readAll(dst []Entry, h uintptr, buf []byte, names, rewind bool) ([]Entry, e
 	}
 }
 
-// The restart forms of the two listing classes, which list from the first
-// entry whatever the handle's position; x/sys does not name them.
-const (
-	fileFullDirectoryRestartInfo   = 15
-	fileIDExtdDirectoryRestartInfo = 20
-)
-
-// asked is the class a call asks for: class, or its restart form when
-// restart is set.
+// asked is the class a call asks for: class, or when restart is set its
+// restart form, which lists from the first entry whatever the handle's
+// position.
 func asked(class uint32, restart bool) uint32 {
 	switch {
 	case !restart:
 		return class
 	case class == windows.FileIdExtdDirectoryInfo:
-		return fileIDExtdDirectoryRestartInfo
+		return windows.FileIdExtdDirectoryRestartInfo
 	default:
-		return fileFullDirectoryRestartInfo
+		return windows.FileFullDirectoryRestartInfo
 	}
 }
 
