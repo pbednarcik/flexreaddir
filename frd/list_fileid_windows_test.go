@@ -272,7 +272,7 @@ func TestRewindListsAgainWhenTheVolumeRefusesTheIDClass(t *testing.T) {
 	t.Cleanup(func() { refuseFileIDWith = 0 })
 	l.Rewind = true
 	again, err := l.AppendHandle(nil, fd, dir)
-	if err != nil || !maps.Equal(typesOf(again), typesOf(first)) {
-		t.Fatalf("refused, Rewind: %v, %v; want %v", typesOf(again), err, typesOf(first))
+	if err != nil || !maps.Equal(typesOf(t, again), typesOf(t, first)) {
+		t.Fatalf("refused, Rewind: %v, %v; want %v", typesOf(t, again), err, typesOf(t, first))
 	}
 }

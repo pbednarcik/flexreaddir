@@ -27,10 +27,15 @@ func listerTree(t *testing.T) string {
 	return dir
 }
 
-// typesOf is the set of entries' names and types.
-func typesOf(entries []Entry) map[string]os.FileMode {
+// typesOf is the set of entries' names and types; a name listed twice fails
+// the test, which a set could not see.
+func typesOf(t *testing.T, entries []Entry) map[string]os.FileMode {
+	t.Helper()
 	m := make(map[string]os.FileMode, len(entries))
 	for _, e := range entries {
+		if _, dup := m[e.Name]; dup {
+			t.Fatalf("%s listed twice", e.Name)
+		}
 		m[e.Name] = e.Type
 	}
 	return m
@@ -55,8 +60,8 @@ func TestRewindListsAFileListedBeforeInFull(t *testing.T) {
 		if cerr := f.Close(); cerr != nil {
 			t.Fatal(cerr)
 		}
-		if err != nil || len(first) == 0 || !maps.Equal(typesOf(again), typesOf(first)) {
-			t.Errorf("names %v: AppendDir again with Rewind = %v, %v; want the first listing's %v", names, typesOf(again), err, typesOf(first))
+		if err != nil || len(first) == 0 || !maps.Equal(typesOf(t, again), typesOf(t, first)) {
+			t.Errorf("names %v: AppendDir again with Rewind = %v, %v; want the first listing's %v", names, typesOf(t, again), err, typesOf(t, first))
 		}
 	}
 }

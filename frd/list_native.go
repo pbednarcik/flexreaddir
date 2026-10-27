@@ -39,8 +39,9 @@ type Lister struct {
 	// than from the handle's position, so a handle listed before lists again
 	// in full. On Windows the first call asks the restart form of its class,
 	// with no extra call; on Linux and macOS the descriptor is first moved to its
-	// start with lseek. Two listings of one handle at once still split its
-	// entries between them.
+	// start with lseek. Two listings of one handle at once share its position:
+	// one that rewinds moves the other's, which then repeats or skips entries,
+	// so list a shared handle from one goroutine at a time.
 	Rewind bool
 
 	buf []byte // what the kernel fills, allocated on first use

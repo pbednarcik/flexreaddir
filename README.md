@@ -269,7 +269,8 @@ as you keep it, so a walker keeps one per goroutine.
 - It must not be used by two goroutines at once, nor copied after its first
   use.
 - One directory is listed by one goroutine at a time: two calls on one
-  `os.File` share its offset and split its entries between them.
+  `os.File` share its offset and split its entries between them, or under
+  `Rewind` repeat or skip them.
 
 Set `Names` to list names and types only: every `Entry` has `Name` and
 `Type`, and `Size`, `ModTimeNanos`, `ChangeTimeNanos` and `FileID` are zero,
@@ -308,7 +309,8 @@ restart form of its class (`FileIdExtdDirectoryRestartInfo`, or
 `FileFullDirectoryRestartInfo` under `Names` and on a volume that refuses the
 file id), so it takes no extra call; on Linux and macOS the descriptor is
 moved to its start with `lseek` first. Two listings of one handle at once
-still split its entries.
+share its position: one that rewinds moves the other's, which then repeats or
+skips entries, so list a shared handle from one goroutine at a time.
 
 ```go
 var l frd.Lister

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -65,16 +66,44 @@ func TestRewindListsAHandleListedBeforeInFull(t *testing.T) {
 		l.Rewind = true
 		for i := range 2 {
 			again, err := l.AppendHandle(nil, fd, dir)
-			if err != nil || !maps.Equal(typesOf(again), typesOf(first)) {
-				t.Errorf("names %v: listing %d with Rewind = %v, %v; want the first listing's %v", names, i+2, typesOf(again), err, typesOf(first))
+			if err != nil || !maps.Equal(typesOf(t, again), typesOf(t, first)) {
+				t.Errorf("names %v: listing %d with Rewind = %v, %v; want the first listing's %v", names, i+2, typesOf(t, again), err, typesOf(t, first))
 			}
 		}
 		mustCloseRaw(t, fd)
 		fresh := openRaw(t, dir)
 		got, err := l.AppendHandle(nil, fresh, dir)
 		mustCloseRaw(t, fresh)
-		if err != nil || !maps.Equal(typesOf(got), typesOf(first)) {
-			t.Errorf("names %v: a fresh handle with Rewind = %v, %v; want %v", names, typesOf(got), err, typesOf(first))
+		if err != nil || !maps.Equal(typesOf(t, got), typesOf(t, first)) {
+			t.Errorf("names %v: a fresh handle with Rewind = %v, %v; want %v", names, typesOf(t, got), err, typesOf(t, first))
+		}
+	}
+}
+
+// A directory larger than one buffer: only the first call restarts, so a
+// rewound listing reads every buffer once.
+func TestRewindListsADirectoryLargerThanOneBufferOnce(t *testing.T) {
+	const files = 3000
+	dir := t.TempDir()
+	for i := range files {
+		if err := os.WriteFile(filepath.Join(dir, "f"+strconv.Itoa(i)+".go"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, names := range []bool{false, true} {
+		fd := openRaw(t, dir)
+		l := Lister{Names: names}
+		first, err := l.AppendHandle(nil, fd, dir)
+		if err == nil {
+			l.Rewind = true
+			var again []Entry
+			if again, err = l.AppendHandle(nil, fd, dir); err == nil && (len(typesOf(t, first)) != files || len(typesOf(t, again)) != files) {
+				t.Errorf("names %v: listed %d, then with Rewind %d; want %d each", names, len(first), len(again), files)
+			}
+		}
+		mustCloseRaw(t, fd)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }
